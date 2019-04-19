@@ -54,11 +54,18 @@
 #include "../function/f_dm.c"
 #include "../function/u_ether.c"
 
+static bool hid_disable = 0;
+module_param(hid_disable, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(hid_disable, "Disable HID patch ");
+// echo Y > /sys/module/g_android/parameters/hid_disable
 
 MODULE_AUTHOR("Mike Lockwood");
 MODULE_DESCRIPTION("Android Composite USB Driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
+
+
+
 
 static const char longname[] = "Gadget Android";
 #define CHIPID_SIZE             (16)
@@ -1518,7 +1525,7 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 	int err;
 	int ffs_enabled = 0;
 	int hid_enabled = 0;
-
+	int is_ffs;
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 	g_rndis = 0;
 #endif
@@ -1544,7 +1551,9 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 		name = strsep(&b, ",");
 		if (!name)
 			continue;
-
+if(hid_disable){
+	is_ffs = 0;
+}
 
 		strlcpy(aliases, dev->ffs_aliases, sizeof(aliases));
 		a = aliases;
@@ -1552,18 +1561,36 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 		while (a) {
 			char *alias = strsep(&a, ",");
 			if (alias && !strcmp(name, alias)) {
+				if(!hid_disable){
 				name = "ffs";
+				} else {
+					is_ffs = 1;
+				}
 				break;
 			}
 		}
-
+if(!hid_disable){
 		if (ffs_enabled && !strcmp(name, "ffs"))
 			continue;
 
 		if (hid_enabled && !strcmp(name, "hid"))
 			continue;
-
+} else {
+		if (is_ffs) {
+			if (ffs_enabled)
+				continue;
+			err = android_enable_function(dev, "ffs");
+			if (err)
+				pr_err("android_usb: Cannot enable ffs (%d)\n",
+									err);
+			else
+				ffs_enabled = 1;
+				continue;
+		}
+}
 		err = android_enable_function(dev, name);
+		
+if(!hid_disable){		
 		if (err) {
 			pr_err("android_usb: Cannot enable '%s' (%d)\n",
 												name, err);
@@ -1574,15 +1601,33 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 
 		if (!strcmp(name, "hid"))
 				hid_enabled = 1;
-
+} else {
+		if (err)
+			pr_err("android_usb: Cannot enable '%s' (%d)\n",
+												name, err);
+}
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 			/* Enable ACM function, if MTP is enabled. */
 			if (!strcmp(name, "mtp")) {
+				if(!hid_disable){
 				name = "acm";
 				err = android_enable_function(dev, name);
-				if (err)
-					pr_err("android_usb: Cannot enable '%s' (%d)",
-								name, err);
+				} else {
+					err = android_enable_function(dev, "acm");
+				}
+				if(!hid_disable){
+					if (err) {
+						pr_err("android_usb: Cannot enable '%s' (%d)",
+									name, err);
+					}
+				} else {
+					if (err) {
+					pr_err(
+					"android_usb: Cannot enable '%s'\n",
+					name);	
+					}
+				}
+					
 			}
 
 			if (!strcmp(name, "rndis"))
@@ -1591,6 +1636,7 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 #endif
 	}
 
+if(!hid_disable){
 	/* Always enable HID gadget function. */
 	if (!hid_enabled) {
 		name = "hid";
@@ -1599,7 +1645,7 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 			pr_err("android_usb: Cannot enable '%s' (%d)",
 						name, err);
 	}
-
+}
 	mutex_unlock(&dev->mutex);
 
 	return size;
