@@ -9,7 +9,7 @@
 # -----
 export ARCH=arm64
 export SUBARCH=arm64
-export BUILD_CROSS_COMPILE=/home/moro/kernel/toolchains/aarch64-linux-android-4.9/bin/aarch64-linux-android-
+export BUILD_CROSS_COMPILE=/home/svirusx/aarch64-linux-android-4.9/bin/aarch64-linux-android-
 export CROSS_COMPILE=$BUILD_CROSS_COMPILE
 export BUILD_JOB_NUMBER=`grep processor /proc/cpuinfo|wc -l`
 
