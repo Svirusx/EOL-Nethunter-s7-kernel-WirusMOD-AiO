@@ -29,9 +29,9 @@ DEFCONFIG_S7EDGE=moro-edge_defconfig
 DEFCONFIG_S7FLAT=moro-flat_defconfig
 
 
-K_VERSION="v7.2"
+K_VERSION="v1.1"
 K_BASE="CSF1"
-K_NAME="MoRoKernel"
+K_NAME="Nethunter_WirusMOD"
 export KBUILD_BUILD_VERSION="1"
 
 
@@ -267,11 +267,11 @@ echo ""
 echo ""
 echo "Build Kernel for:"
 echo ""
-echo "Only S7 EDGE G935"
-echo "(1) S7 Edge - Samsung OREO"
-echo "(2) S7 Edge - Samsung PIE (r28)"
-echo "(3) S7 Edge - AOSP PIE"
-echo "(5) S7 Edge - TREBLE PIE"
+echo "Only S7 G930"
+echo "(1) S7 - Samsung OREO"
+echo "(2) S7 - Samsung PIE (r28)"
+echo "(3) S7 - AOSP PIE"
+echo "(5) S7 - TREBLE PIE"
 echo ""
 echo "S7 AllInOne: OREO + PIE + AOSP"
 echo "(4) S7 AllInOne: OREO + PIE + AOSP"
@@ -284,56 +284,56 @@ echo ""
 
 if [ $prompt == "1" ]; then
 
-    echo "S7 Edge - Samsung OREO Selected"
+    echo "S7 - Samsung OREO Selected"
 
     OS=twOreo
     K_OS=OREO
     GPU=r22
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
     MAIN
 	
 elif [ $prompt == "2" ]; then
 
-    echo "S7 Edge - Samsung PIE Selected (r28)"
+    echo "S7 - Samsung PIE Selected (r28)"
 
     OS=twPie
     K_OS=PIE
     GPU=r28
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
     MAIN
 	
 elif [ $prompt == "3" ]; then
 
-    echo "S7 Edge - AOSP PIE Selected"
+    echo "S7 - AOSP PIE Selected"
 
     OS=aospPie
     K_OS=PIE
     GPU=r22
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
     MAIN
     
 elif [ $prompt == "5" ]; then
 
-    echo "S7 Edge - TREBLE PIE Selected"
+    echo "S7 - TREBLE PIE Selected"
 
     OS=treblePie
     K_OS=PIE
     GPU=r28
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
     MAIN
