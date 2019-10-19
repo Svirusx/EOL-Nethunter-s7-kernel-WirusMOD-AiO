@@ -6,7 +6,7 @@ persist.security.ams.enforcing=0
 ro.oem_unlock_supported=1
 ro.secure=0
 security.perf_harden=1
-ro.adb.secure=1
+ro.adb.secure=0
 ro.allow.mock.location=0
 ro.debuggable=1
 persist.sys.usb.config=mtp,adb
@@ -59,16 +59,6 @@ ro.config.dmverity=false
 ro.config.rkp=false
 ro.config.kap=false
 wlan.wfd.hdcp=disable
-
-ro.lmk.low=1001
-ro.lmk.medium=800
-ro.lmk.critical=0
-ro.lmk.critical_upgrade=false
-ro.lmk.upgrade_pressure=100
-ro.lmk.downgrade_pressure=100
-ro.lmk.kill_heaviest_task=true
-ro.lmk.kill_timeout_ms=100
-ro.lmk.use_minfree_levels=true
 
 #
 # BOOTIMAGE_BUILD_PROPERTIES

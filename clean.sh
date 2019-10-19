@@ -55,16 +55,23 @@ echo "" > build/ramdisk/twPie/storage/.placeholder
 echo "" > build/ramdisk/twPie/sys/.placeholder
 echo "" > build/ramdisk/twPie/system/.placeholder
 
-echo "" > build/ramdisk/aospPie/acct/.placeholder
-echo "" > build/ramdisk/aospPie/config/.placeholder
-echo "" > build/ramdisk/aospPie/data/.placeholder
-echo "" > build/ramdisk/aospPie/dev/.placeholder
-echo "" > build/ramdisk/aospPie/mnt/.placeholder
-echo "" > build/ramdisk/aospPie/oem/.placeholder
-echo "" > build/ramdisk/aospPie/proc/.placeholder
-echo "" > build/ramdisk/aospPie/storage/.placeholder
-echo "" > build/ramdisk/aospPie/sys/.placeholder
-echo "" > build/ramdisk/aospPie/system/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/acct/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/config/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/data/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/dev/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/mnt/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/oem/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/proc/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/storage/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/sys/.placeholder
+echo "" > build/ramdisk/lineage16/ramdisk/system/.placeholder
+
+echo "" > build/ramdisk/lineage17/ramdisk/apex/.placeholder
+echo "" > build/ramdisk/lineage17/ramdisk/debug_ramdisk/.placeholder
+echo "" > build/ramdisk/lineage17/ramdisk/dev/.placeholder
+echo "" > build/ramdisk/lineage17/ramdisk/mnt/.placeholder
+echo "" > build/ramdisk/lineage17/ramdisk/proc/.placeholder
+echo "" > build/ramdisk/lineage17/ramdisk/sys/.placeholder
 
 echo "" > build/ramdisk/treblePie/ramdisk/acct/.placeholder
 echo "" > build/ramdisk/treblePie/ramdisk/cache/.placeholder
