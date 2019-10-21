@@ -291,11 +291,11 @@ echo ""
 echo "Build Kernel for:"
 echo ""
 echo "Only S7 EDGE G935"
-echo "(1) S7 Edge - Samsung OREO"
-echo "(2) S7 Edge - Samsung PIE (r28)"
-echo "(3) S7 Edge - Lineage 16"
-echo "(4) S7 Edge - Lineage 17"
-echo "(5) S7 Edge - TREBLE PIE"
+echo "(1) S7 - Samsung OREO"
+echo "(2) S7 - Samsung PIE (r28)"
+echo "(3) S7 - Lineage 16"
+echo "(4) S7 - Lineage 17"
+echo "(5) S7 - TREBLE PIE"
 echo ""
 echo "S7 AllInOne: OREO + PIE + Lineage + Treble"
 echo "(6) S7 AllInOne: OREO + PIE + AOSP"
@@ -336,21 +336,21 @@ elif [ $prompt == "2" ]; then
 	
 elif [ $prompt == "3" ]; then
 
-    echo "S7 Edge - Lineage 16 Selected"
+    echo "S7 - Lineage 16 Selected"
 
     OS=lineage16
     K_OS=PIE
     GPU=r22
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
     MAIN
 
 elif [ $prompt == "4" ]; then
 
-    echo "S7 Edge - Lineage 17 Selected"
+    echo "S7 - Lineage 17 Selected"
 
     OS=lineage17
     K_OS=PIE
