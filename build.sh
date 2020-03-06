@@ -30,7 +30,7 @@ DEFCONFIG_S7FLAT=moro-flat_defconfig
 
 
 
-K_VERSION="v1.5"
+K_VERSION="v1.6"
 K_SUBVER="5"
 K_BASE="CSI1"
 K_NAME="Nethunter_WirusMOD"
