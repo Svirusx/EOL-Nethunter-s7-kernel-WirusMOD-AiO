@@ -218,6 +218,8 @@ FUNC_BUILD_RAMDISK()
 
 	echo SEANDROIDENFORCE >> image-new.img
 	mkdir $RDIR/build/kernel-temp 2>/dev/null
+	mkdir $RDIR/build/$MODEL-$OS-$GPU-modules
+	find $RDIR/ -name '*.ko' -exec mv -t $RDIR/build/$MODEL-$OS-$GPU-modules {} +
 	mv image-new.img $RDIR/build/kernel-temp/$MODEL-$OS-$GPU-boot.img
 	rm -rf $RDIR/build/temp
 
