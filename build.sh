@@ -5,11 +5,12 @@
 # MoRoKernel Build Script
 #
 
+
 # SETUP
 # -----
 export ARCH=arm64
 export SUBARCH=arm64
-export BUILD_CROSS_COMPILE=/home/moro/kernel/toolchains/ubertc-6.5/bin/aarch64-linux-android-
+export BUILD_CROSS_COMPILE=/home/svirusx/ubertc-6.x/bin/aarch64-linux-android-
 export CROSS_COMPILE=$BUILD_CROSS_COMPILE
 export BUILD_JOB_NUMBER=`grep processor /proc/cpuinfo|wc -l`
 
@@ -29,10 +30,10 @@ DEFCONFIG_S7EDGE=moro-edge_defconfig
 DEFCONFIG_S7FLAT=moro-flat_defconfig
 
 
-K_VERSION="v8.0.1"
+K_VERSION="v1."
 K_SUBVER="8"
 K_BASE="CTA4"
-K_NAME="MoRoKernel"
+K_NAME="Nethunter_WirusMOD"
 export KBUILD_BUILD_VERSION="1"
 
 
@@ -197,6 +198,17 @@ FUNC_BUILD_RAMDISK()
 
 	echo SEANDROIDENFORCE >> image-new.img
 	mkdir $RDIR/build/kernel-temp 2>/dev/null
+	mkdir -p $RDIR/build/$MODEL-$OS-$GPU/modules
+	mkdir -p $RDIR/build/$MODEL-$OS-$GPU/firmware
+	find $RDIR/ -name '*.ko'  -not -path "$RDIR/build/*" -exec cp --parents -f '{}' $RDIR/build/$MODEL-$OS-$GPU/modules  \;
+	find $RDIR/ -name '*.fw'  -not -path "$RDIR/build/*" -exec cp --parents -f '{}' $RDIR/build/$MODEL-$OS-$GPU/firmware \;
+	find $RDIR/ -name '*.ko'  -not -path "$RDIR/build/*" -exec rm -f {} +
+	find $RDIR/ -name '*.fw'  -not -path "$RDIR/build/*" -exec rm -f {} +
+	mv -f $RDIR/build/$MODEL-$OS-$GPU/modules/home/svirusx/Nethunter-s7-kernel-WirusMOD-AiO/* $RDIR/build/$MODEL-$OS-$GPU/modules
+	rm -rf $RDIR/build/$MODEL-$OS-$GPU/modules/home
+	mv -f $RDIR/build/$MODEL-$OS-$GPU/firmware/home/svirusx/Nethunter-s7-kernel-WirusMOD-AiO/* $RDIR/build/$MODEL-$OS-$GPU/firmware
+	rm -rf $RDIR/build/$MODEL-$OS-$GPU/firmware/home
+
 	mv image-new.img $RDIR/build/kernel-temp/$MODEL-$OS-$GPU-boot.img
 	rm -rf $RDIR/build/temp
 
@@ -276,14 +288,14 @@ echo ""
 echo ""
 echo "Build Kernel for:"
 echo ""
-echo "Only S7 EDGE G935"
-echo "(1) S7 Edge - Samsung OREO"
-echo "(2) S7 Edge - Samsung PIE (r29)"
-echo "(3) S7 Edge - Samsung Q"
-echo "(4) S7 Edge - Lineage 16"
-echo "(5) S7 Edge - Lineage 17"
-echo "(6) S7 Edge - TREBLE AOSP"
-echo "(7) S7 Edge - TREBLE Samsung"
+echo "Only S7 Flat G935"
+echo "(1) S7 Flat - Samsung OREO"
+echo "(2) S7 Flat - Samsung PIE (r29)"
+echo "(3) S7 Flat - Samsung Q"
+echo "(4) S7 Flat - Lineage 16"
+echo "(5) S7 Flat - Lineage 17"
+echo "(6) S7 Flat - TREBLE AOSP"
+echo "(7) S7 Flat - TREBLE Samsung"
 echo ""
 echo "S7 AllInOne: OREO + PIE + Lineage + Treble"
 echo "(8) S7 AllInOne: OREO + PIE + Q + AOSP + TREBLE"
@@ -296,15 +308,15 @@ echo ""
 
 if [[ $prompt == "1" ]]; then
 
-    echo "S7 Edge - Samsung OREO Selected"
+    echo "S7 Flat - Samsung OREO Selected"
 
     OS=twOreo
     ANDROID=8
     MTP=sam
     GPU=r29
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -312,15 +324,15 @@ if [[ $prompt == "1" ]]; then
 	
 elif [[ $prompt == "2" ]]; then
 
-    echo "S7 Edge - Samsung PIE Selected (r29)"
+    echo "S7 Flat - Samsung PIE Selected (r29)"
 
     OS=twPie
     ANDROID=9
     MTP=sam
     GPU=r29
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -328,15 +340,15 @@ elif [[ $prompt == "2" ]]; then
 
 elif [[ $prompt == "3" ]]; then
 
-    echo "S7 Edge - Samsung Q Selected"
+    echo "S7 Flat - Samsung Q Selected"
 
     OS=twQ
     ANDROID=9
     MTP=sam
     GPU=r29
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=no
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -344,15 +356,15 @@ elif [[ $prompt == "3" ]]; then
 	
 elif [[ $prompt == "4" ]]; then
 
-    echo "S7 Edge - Lineage 16 Selected"
+    echo "S7 Flat - Lineage 16 Selected"
 
     OS=los16
     ANDROID=8
     MTP=aosp
     GPU=r29
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -360,15 +372,15 @@ elif [[ $prompt == "4" ]]; then
 
 elif [[ $prompt == "5" ]]; then
 
-    echo "S7 Edge - Lineage 17 Selected"
+    echo "S7 Flat - Lineage 17 Selected"
 
     OS=los17
     ANDROID=8
     MTP=aosp
     GPU=r29
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -376,15 +388,15 @@ elif [[ $prompt == "5" ]]; then
     
 elif [[ $prompt == "6" ]]; then
 
-    echo "S7 Edge - TREBLE AOSP Selected"
+    echo "S7 Flat - TREBLE AOSP Selected"
 
     OS=treble
     ANDROID=9
     MTP=aosp
     GPU=r28
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -392,15 +404,15 @@ elif [[ $prompt == "6" ]]; then
     
 elif [[ $prompt == "7" ]]; then
 
-    echo "S7 Edge - TREBLE Samsung Selected"
+    echo "S7 Flat - TREBLE Samsung Selected"
 
     OS=trebleUi
     ANDROID=9
     MTP=sam
     GPU=r28
-    MODEL=G935
+    MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
