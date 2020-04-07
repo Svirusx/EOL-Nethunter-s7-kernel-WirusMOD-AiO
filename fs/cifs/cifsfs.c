@@ -53,7 +53,6 @@
 #include "smb2pdu.h"
 #endif
 
-bool fsync_enabled;
 
 int cifsFYI = 0;
 int traceSMB = 0;
