@@ -136,7 +136,10 @@ void panic(const char *fmt, ...)
 		dump_stack();
 #endif
 
+#ifdef CONFIG_SCHED_DEBUG
 	sysrq_sched_debug_show();
+#endif
+
 	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle
 	 * everything else.
