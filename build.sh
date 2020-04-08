@@ -30,7 +30,7 @@ DEFCONFIG_S7EDGE=moro-edge_defconfig
 DEFCONFIG_S7FLAT=moro-flat_defconfig
 
 
-K_VERSION="v1.7"
+K_VERSION="v1.8"
 K_SUBVER="8"
 K_BASE="CTA4"
 K_NAME="Nethunter_WirusMOD"
