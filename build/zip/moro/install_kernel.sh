@@ -22,14 +22,10 @@ fi
 set_progress 0.01
 
 # Mount system
-mount_system
-ui_print "@Mount partitions"
-ui_print "-- mount /system RW"
-if [ $SYSTEM_ROOT == true ]; then
-	ui_print "-- Device is system-as-root"
-	ui_print "-- Remounting /system as /system_root"
-fi
+mount_parts
 
+# Init variables 
+init_variables
 
 #Check device and set OS variable
 set_os
@@ -49,6 +45,14 @@ $BB tar -Jxf secure_storage.tar.xz
 ui_print "-- Copying files"
 
 
+# f2fs support for los17
+if [ $OS == "los17" ]; then
+	cp -f /tmp/moro/files/fstab.samsungexynos8890 /system_root
+	chmod 640 /system_root/fstab.samsungexynos8890
+	chown -R root.shell /system_root/fstab.samsungexynos8890
+fi
+
+
 # System As Root init scripts
 if [ $OS == "los17" ] || [ $OS == "twQ" ]; then
 	. /tmp/moro/sar_init.sh
@@ -56,13 +60,13 @@ fi
 
 
 # GPU libs
-#if [ "$(file_getprop /tmp/aroma/menu.prop group4)" == "opt13" ]; then
-#	ui_print "-- Installing R22 GPU libs"
-#	cp -rf r22_libs/. /
-#elif [ "$(file_getprop /tmp/aroma/menu.prop group4)" == "opt14" ]; then
-#	ui_print "-- Installing R28 GPU libs"
-#	cp -rf r28_libs/. /
-#fi
+if [ "$(file_getprop /tmp/aroma/gpu.prop selected.1)" == "1" ]; then
+	ui_print "-- Installing R22 GPU libs"
+	cp -rf r22_libs/. $VENDOR/
+elif [ "$(file_getprop /tmp/aroma/gpu.prop selected.1)" == "2" ]; then
+	ui_print "-- Installing R28 GPU libs"
+	cp -rf r28_libs/. $VENDOR/
+fi
 
 
 # Copy secure_storage libs
@@ -74,7 +78,6 @@ if [ $OS == "twOreo" ];then
 	set_perm 0 2000 0644 /system/vendor/lib64/libsecure_storage.so u:object_r:system_file:s0
 	set_perm 0 2000 0644 /system/vendor/lib64/libsecure_storage_jni.so u:object_r:system_file:s0
 fi
-
 
 
 set_progress 0.35
@@ -102,7 +105,7 @@ set_progress 0.60
 
 
 ## MTWEAKS
-if [ "$(file_getprop /tmp/aroma/menu.prop chk2)" == 1 ]; then
+if [ "$(file_getprop /tmp/aroma/menu.prop chk3)" == 1 ]; then
 	ui_print " "
 	ui_print "@MTWeaks App"
 	sh /tmp/moro/moro_clean.sh com.moro.mtweaks -as
@@ -110,12 +113,12 @@ if [ "$(file_getprop /tmp/aroma/menu.prop chk2)" == 1 ]; then
 fi
 
 ## SPECTRUM PROFILES
-#if [ "$(file_getprop /tmp/aroma/menu.prop chk10)" == 1 ]; then
-#	ui_print " "
-#	ui_print "@Install Spectrum Profiles"
-#	mkdir -p -m 777 /data/.morokernel/apk 2>/dev/null
-#	cp -rf /tmp/moro/spec_profiles/. /data/.morokernel/spectrum
-#fi
+if [ "$(file_getprop /tmp/aroma/menu.prop chk10)" == 1 ]; then
+	ui_print " "
+	ui_print "@Install Spectrum Profiles"
+	mkdir -p -m 777 /data/media/0/spectrum 2>/dev/null
+	cp -rf /tmp/moro/spec_profiles/. /data/media/0/spectrum
+fi
 
 
 set_progress 0.65
@@ -177,16 +180,8 @@ show_progress 0.34 -19000
 fi
 
 
-ui_print " "
-ui_print "@Unmounting"
-unmount_system
-ui_print "-- umount /system"
-if [ $SYSTEM_ROOT == true ]; then
-	ui_print "-- umount /system_root"
-else
-	ui_print "-- umount /vendor"
-	umount -l /system 2>/dev/null
-fi
+# Unmount partitions
+unmount_parts
 
 
 set_progress 1.00

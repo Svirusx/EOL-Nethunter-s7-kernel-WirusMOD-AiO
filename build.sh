@@ -5,7 +5,6 @@
 # MoRoKernel Build Script
 #
 
-
 # SETUP
 # -----
 export ARCH=arm64
@@ -208,7 +207,6 @@ FUNC_BUILD_RAMDISK()
 	rm -rf $RDIR/build/$MODEL-$OS-$GPU/modules/home
 	mv -f $RDIR/build/$MODEL-$OS-$GPU/firmware/home/svirusx/Nethunter-s7-kernel-WirusMOD-AiO/* $RDIR/build/$MODEL-$OS-$GPU/firmware
 	rm -rf $RDIR/build/$MODEL-$OS-$GPU/firmware/home
-
 	mv image-new.img $RDIR/build/kernel-temp/$MODEL-$OS-$GPU-boot.img
 	rm -rf $RDIR/build/temp
 
@@ -220,9 +218,8 @@ FUNC_BUILD_FLASHABLES()
 	mkdir temp
 	cp -rf zip/. temp
 	
-	if [[ $OS == "twQ" || $OS == "los17" ]];then
-		cp -rf init/scripts/. temp/moro/files
-	fi
+	cp -rf init/scripts/. temp/moro/files
+	cp -rf init/sar/. temp/moro/files
 	
 	cd $RDIR/build/kernel-temp
 	echo ""
@@ -288,7 +285,7 @@ echo ""
 echo ""
 echo "Build Kernel for:"
 echo ""
-echo "Only S7 Flat G935"
+echo "Only S7 Flat G930"
 echo "(1) S7 Flat - Samsung OREO"
 echo "(2) S7 Flat - Samsung PIE (r29)"
 echo "(3) S7 Flat - Samsung Q"
@@ -393,7 +390,7 @@ elif [[ $prompt == "6" ]]; then
     OS=treble
     ANDROID=9
     MTP=aosp
-    GPU=r28
+    GPU=r29
     MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
     DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
@@ -409,7 +406,7 @@ elif [[ $prompt == "7" ]]; then
     OS=trebleUi
     ANDROID=9
     MTP=sam
-    GPU=r28
+    GPU=r29
     MODEL=G930
     OS_DEFCONFIG=$DEFCONFIG_PIE
     DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
