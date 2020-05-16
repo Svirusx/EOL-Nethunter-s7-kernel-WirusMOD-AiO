@@ -204,6 +204,8 @@ source "drivers/thunderbolt/Kconfig"
 
 source "drivers/trace/Kconfig"
 
+source "drivers/tee/Kconfig"
+
 source "drivers/bts/Kconfig"
 
 source "drivers/motor/Kconfig"

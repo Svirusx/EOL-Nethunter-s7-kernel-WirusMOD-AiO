@@ -18,7 +18,8 @@ arm64-obj-y		:= debug-monitors.o entry.o irq.o fpsimd.o		\
 			   hyp-stub.o psci.o cpu_ops.o insn.o	\
 			   return_address.o cpuinfo.o cpu_errata.o		\
 			   cpufeature.o alternative.o psci-call.o		\
-			   smp.o smp_spin_table.o topology.o ctr_el0_handler.o
+			   smp.o smp_spin_table.o topology.o smccc-call.o	\
+			   ctr_el0_handler.o
 
 arm64-obj-$(CONFIG_COMPAT)		+= sys32.o kuser32.o signal32.o 	\
 					   sys_compat.o				\
