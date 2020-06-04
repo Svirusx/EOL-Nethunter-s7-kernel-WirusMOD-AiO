@@ -31,7 +31,7 @@ DEFCONFIG_S7FLAT=moro-flat_defconfig
 
 K_VERSION="v2.0"
 K_SUBVER="8"
-K_BASE="CTA4"
+K_BASE="CTD2"
 K_NAME="Nethunter_WirusMOD"
 export KBUILD_BUILD_VERSION="1"
 
@@ -44,19 +44,6 @@ FUNC_DELETE_PLACEHOLDERS()
 	find . -name \.placeholder -type f -delete
         echo "Placeholders Deleted from Ramdisk"
         echo ""
-}
-
-FUNC_CLEAN_DTB()
-{
-	if ! [ -d $DTSDIR ] ; then
-		echo "no directory : "$DTSDIR""
-	else
-		echo "rm files in : "$RDIR/arch/$ARCH/boot/dts/*.dtb""
-		rm $DTSDIR/*.dtb 2>/dev/null
-		rm $DTBDIR/*.dtb 2>/dev/null
-		rm $OUTDIR/boot.img-dt 2>/dev/null
-		rm $OUTDIR/boot.img-zImage 2>/dev/null
-	fi
 }
 
 FUNC_BUILD_KERNEL()
@@ -100,8 +87,12 @@ FUNC_BUILD_KERNEL()
 	elif [[ $PERMISSIVE == "no" ]]; then
 		sed -i '/CONFIG_ALWAYS_PERMISSIVE/c\# CONFIG_ALWAYS_PERMISSIVE is not set' $RDIR/arch/$ARCH/configs/tmp_defconfig
 	fi
+	
+	# HALL_EVENT_REVERSE for Q rom
+	if [[ $OS == "twQ" ]]; then
+		sed -i '/CONFIG_HALL_EVENT_REVERSE/c\CONFIG_HALL_EVENT_REVERSE=y' $RDIR/arch/$ARCH/configs/tmp_defconfig
+	fi
 
-	#FUNC_CLEAN_DTB
 
 	make -j$BUILD_JOB_NUMBER ARCH=$ARCH \
 			CROSS_COMPILE=$BUILD_CROSS_COMPILE \
