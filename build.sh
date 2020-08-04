@@ -5,7 +5,7 @@
 # MoRoKernel Build Script
 #
 
-# SETUP
+# SETUP 
 # -----
 export ARCH=arm64
 export SUBARCH=arm64
