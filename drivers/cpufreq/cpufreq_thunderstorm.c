@@ -1,5 +1,5 @@
 /*
- * drivers/cpufreq/cpufreq_interactive.c
+ * drivers/cpufreq/cpufreq_thunderstorm.c
  *
  * Copyright (C) 2010 Google, Inc.
  *
@@ -14,6 +14,9 @@
  *
  * Author: Mike Chan (mike@android.com)
  *
+ * This is CPU governor based on interactive with some changes and addodns edited by @nalas XDA
+ * added :
+ * - DOWN_LOW_LOAD_THRESHOLD, editbale by user
  */
 
 #include <linux/cpu.h>
@@ -42,12 +45,14 @@
 #endif
 
 #define CREATE_TRACE_POINTS
-#include <trace/events/cpufreq_interactive.h>
+#include <trace/events/cpufreq_thunderstorm.h>
 
 #define CONFIG_DYNAMIC_MODE_SUPPORT
 //#define CONFIG_DYNAMIC_MODE_SUPPORT_DEBUG
 
-struct cpufreq_interactive_cpuinfo {
+// bool screen_on;
+
+struct cpufreq_thunderstorm_cpuinfo {
 	struct timer_list cpu_timer;
 	struct timer_list cpu_slack_timer;
 	spinlock_t load_lock; /* protects the next 4 fields */
@@ -68,10 +73,10 @@ struct cpufreq_interactive_cpuinfo {
 	int governor_enabled;
 };
 
-static DEFINE_PER_CPU(struct cpufreq_interactive_cpuinfo, cpuinfo);
+static DEFINE_PER_CPU(struct cpufreq_thunderstorm_cpuinfo, cpuinfo);
 
 #define TASK_NAME_LEN 15
-struct task_struct *speedchange_task;
+struct task_struct *speedchange_task1;
 static cpumask_t speedchange_cpumask;
 static spinlock_t speedchange_cpumask_lock;
 static struct mutex gov_lock;
@@ -80,7 +85,11 @@ static struct mutex gov_lock;
 #define DEFAULT_TARGET_LOAD 90
 static unsigned int default_target_loads[] = {DEFAULT_TARGET_LOAD};
 
+/* added 3% so no jump to high freq - was 6 */
+// #define DOWN_LOW_LOAD_THRESHOLD 3
+
 #define DEFAULT_TIMER_RATE (20 * USEC_PER_MSEC)
+#define SCREEN_OFF_TIMER_RATE ((unsigned long)(60 * USEC_PER_MSEC))
 #define DEFAULT_ABOVE_HISPEED_DELAY DEFAULT_TIMER_RATE
 static unsigned int default_above_hispeed_delay[] = {
 	DEFAULT_ABOVE_HISPEED_DELAY };
@@ -92,7 +101,7 @@ static unsigned int default_above_hispeed_delay[] = {
 static bool hmp_boost;
 #endif
 
-struct cpufreq_interactive_tunables {
+struct cpufreq_thunderstorm_tunables {
 	int usage_count;
 	/* Hi speed to bump to from lo speed when load burst (default max) */
 	unsigned int hispeed_freq;
@@ -116,6 +125,7 @@ struct cpufreq_interactive_tunables {
 	 * The sample rate of the timer used to increase frequency
 	 */
 	unsigned long timer_rate;
+	unsigned long prev_timer_rate; 
 	/*
 	 * Wait this long before raising speed above hispeed, by default a
 	 * single timer interval.
@@ -140,6 +150,10 @@ struct cpufreq_interactive_tunables {
 
 	/* handle for get cpufreq_policy */
 	unsigned int *policy;
+
+/* added 3% so no jump to high freq - was 6 */
+#define DEFAULT_DOWN_LOW_LOAD_THRESHOLD 8
+	unsigned long down_low_load_threshold;
 
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
 	int mode_idx;
@@ -168,8 +182,8 @@ struct cpufreq_interactive_tunables {
 };
 
 /* For cases where we have single governor instance for system */
-static struct cpufreq_interactive_tunables *common_tunables;
-static struct cpufreq_interactive_tunables *tuned_parameters[NR_CPUS] = {NULL, };
+static struct cpufreq_thunderstorm_tunables *common_tunables;
+static struct cpufreq_thunderstorm_tunables *tuned_parameters[NR_CPUS] = {NULL, };
 
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
 enum exynos_fb_modes {
@@ -178,7 +192,7 @@ enum exynos_fb_modes {
 	 NR_MODE,
 };
 
-static struct cpufreq_interactive_tunables *exynos_fb_param[NR_MODE] = {NULL, };
+static struct cpufreq_thunderstorm_tunables *exynos_fb_param[NR_MODE] = {NULL, };
 static struct kobject *exynos_fb_kobj[NR_MODE] = {NULL, };
 static struct cpufreq_policy *exynos_fb_policy;
 
@@ -191,10 +205,10 @@ static void exynos_fb_kobject_remove(void);
 
 static struct attribute_group *get_sysfs_attr(void);
 
-static void cpufreq_interactive_timer_resched(
-	struct cpufreq_interactive_cpuinfo *pcpu)
+static void cpufreq_thunderstorm_timer_resched(
+	struct cpufreq_thunderstorm_cpuinfo *pcpu)
 {
-	struct cpufreq_interactive_tunables *tunables =
+	struct cpufreq_thunderstorm_tunables *tunables =
 		pcpu->policy->governor_data;
 	unsigned long expires;
 	unsigned long flags;
@@ -222,10 +236,10 @@ static void cpufreq_interactive_timer_resched(
  * The cpu_timer and cpu_slack_timer must be deactivated when calling this
  * function.
  */
-static void cpufreq_interactive_timer_start(
-	struct cpufreq_interactive_tunables *tunables, int cpu)
+static void cpufreq_thunderstorm_timer_start(
+	struct cpufreq_thunderstorm_tunables *tunables, int cpu)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
+	struct cpufreq_thunderstorm_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
 	unsigned long expires = jiffies +
 		usecs_to_jiffies(tunables->timer_rate);
 	unsigned long flags;
@@ -249,7 +263,7 @@ static void cpufreq_interactive_timer_start(
 }
 
 static unsigned int freq_to_above_hispeed_delay(
-	struct cpufreq_interactive_tunables *tunables,
+	struct cpufreq_thunderstorm_tunables *tunables,
 	unsigned int freq)
 {
 	int i;
@@ -268,7 +282,7 @@ static unsigned int freq_to_above_hispeed_delay(
 }
 
 static unsigned int freq_to_targetload(
-	struct cpufreq_interactive_tunables *tunables, unsigned int freq)
+	struct cpufreq_thunderstorm_tunables *tunables, unsigned int freq)
 {
 	int i;
 	unsigned int ret;
@@ -290,7 +304,7 @@ static unsigned int freq_to_targetload(
  * choose_freq() will find the minimum frequency that does not exceed its
  * target load given the current load.
  */
-static unsigned int choose_freq(struct cpufreq_interactive_cpuinfo *pcpu,
+static unsigned int choose_freq(struct cpufreq_thunderstorm_cpuinfo *pcpu,
 		unsigned int loadadjfreq)
 {
 	unsigned int freq = pcpu->policy->cur;
@@ -377,8 +391,8 @@ static unsigned int choose_freq(struct cpufreq_interactive_cpuinfo *pcpu,
 
 static u64 update_load(int cpu)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
-	struct cpufreq_interactive_tunables *tunables =
+	struct cpufreq_thunderstorm_cpuinfo *pcpu = &per_cpu(cpuinfo, cpu);
+	struct cpufreq_thunderstorm_tunables *tunables =
 		pcpu->policy->governor_data;
 	u64 now;
 	u64 now_idle;
@@ -409,7 +423,7 @@ static u64 update_load(int cpu)
 #ifdef CONFIG_DYNAMIC_MODE_SUPPORT
 
 static void set_new_param_set(unsigned int index,
-			struct cpufreq_interactive_tunables * tunables)
+			struct cpufreq_thunderstorm_tunables * tunables)
 {
 	unsigned long flags;
 #ifdef CONFIG_DYNAMIC_MODE_SUPPORT_DEBUG
@@ -444,7 +458,7 @@ static void set_new_param_set(unsigned int index,
 #endif
 	tunables->cur_param_index = index;
 }
-static void enter_mode(struct cpufreq_interactive_tunables * tunables)
+static void enter_mode(struct cpufreq_thunderstorm_tunables * tunables)
 {
 	pr_info("Governor: enter mode 0x%x\n", tunables->mode);
 	set_new_param_set(tunables->mode, tunables);
@@ -460,7 +474,7 @@ static void enter_mode(struct cpufreq_interactive_tunables * tunables)
 	}
 }
 
-static void exit_mode(struct cpufreq_interactive_tunables * tunables)
+static void exit_mode(struct cpufreq_thunderstorm_tunables * tunables)
 {
 	pr_info("Governor: exit mode 0x%x\n", tunables->mode);
 	set_new_param_set(0, tunables);
@@ -473,20 +487,21 @@ static void exit_mode(struct cpufreq_interactive_tunables * tunables)
 }
 #endif
 
-static void cpufreq_interactive_timer(unsigned long data)
+static void cpufreq_thunderstorm_timer(unsigned long data)
 {
 	u64 now;
 	unsigned int delta_time;
 	u64 cputime_speedadj;
 	int cpu_load;
-	struct cpufreq_interactive_cpuinfo *pcpu =
+	struct cpufreq_thunderstorm_cpuinfo *pcpu =
 		&per_cpu(cpuinfo, data);
-	struct cpufreq_interactive_tunables *tunables =
+	struct cpufreq_thunderstorm_tunables *tunables =
 		pcpu->policy->governor_data;
 	unsigned int new_freq;
 	unsigned int loadadjfreq;
 	unsigned int index;
 	unsigned long flags;
+	unsigned long down_low_load_threshold;
 	u64 max_fvtime;
 
 	if (!down_read_trylock(&pcpu->enable_sem))
@@ -529,12 +544,26 @@ static void cpufreq_interactive_timer(unsigned long data)
 			if (new_freq < tunables->hispeed_freq)
 				new_freq = tunables->hispeed_freq;
 		}
+/* added */
+	} else if (cpu_load <= down_low_load_threshold) {
+		new_freq = pcpu->policy->cpuinfo.min_freq; // end
 	} else {
 		new_freq = choose_freq(pcpu, loadadjfreq);
 		if (new_freq > tunables->hispeed_freq &&
 				pcpu->policy->cur < tunables->hispeed_freq)
 			new_freq = tunables->hispeed_freq;
 	}
+
+/*	if (screen_on
+		&& tunables->timer_rate != tunables->prev_timer_rate)
+		tunables->timer_rate = tunables->prev_timer_rate;
+	else if (!screen_on
+		&& tunables->timer_rate != SCREEN_OFF_TIMER_RATE) {
+		tunables->prev_timer_rate = tunables->timer_rate;
+		tunables->timer_rate
+			= max(tunables->timer_rate,
+				SCREEN_OFF_TIMER_RATE);
+	} */ /* disabled screen on */
 
 	if (cpufreq_frequency_table_target(pcpu->policy, pcpu->freq_table,
 					   new_freq, CPUFREQ_RELATION_L,
@@ -549,7 +578,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	    new_freq > pcpu->policy->cur &&
 	    now - pcpu->pol_hispeed_val_time <
 	    freq_to_above_hispeed_delay(tunables, pcpu->policy->cur)) {
-		trace_cpufreq_interactive_notyet(
+		trace_cpufreq_thunderstorm_notyet(
 			data, cpu_load, pcpu->target_freq,
 			pcpu->policy->cur, new_freq);
 		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
@@ -586,7 +615,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	if (new_freq < pcpu->floor_freq &&
 	    pcpu->target_freq >= pcpu->policy->cur) {
 		if (now - max_fvtime < tunables->min_sample_time) {
-			trace_cpufreq_interactive_notyet(
+			trace_cpufreq_thunderstorm_notyet(
 				data, cpu_load, pcpu->target_freq,
 				pcpu->policy->cur, new_freq);
 			spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
@@ -611,14 +640,14 @@ static void cpufreq_interactive_timer(unsigned long data)
 
 	if (pcpu->target_freq == new_freq &&
 			pcpu->target_freq <= pcpu->policy->cur) {
-		trace_cpufreq_interactive_already(
+		trace_cpufreq_thunderstorm_already(
 			data, cpu_load, pcpu->target_freq,
 			pcpu->policy->cur, new_freq);
 		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags);
 		goto rearm;
 	}
 
-	trace_cpufreq_interactive_target(data, cpu_load, pcpu->target_freq,
+	trace_cpufreq_thunderstorm_target(data, cpu_load, pcpu->target_freq,
 					 pcpu->policy->cur, new_freq);
 
 	pcpu->target_freq = new_freq;
@@ -626,7 +655,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	spin_lock_irqsave(&speedchange_cpumask_lock, flags);
 	cpumask_set_cpu(data, &speedchange_cpumask);
 	spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
-	wake_up_process(speedchange_task);
+	wake_up_process(speedchange_task1);
 
 	goto rearm;
 
@@ -635,16 +664,16 @@ target_update:
 
 rearm:
 	if (!timer_pending(&pcpu->cpu_timer))
-		cpufreq_interactive_timer_resched(pcpu);
+		cpufreq_thunderstorm_timer_resched(pcpu);
 
 exit:
 	up_read(&pcpu->enable_sem);
 	return;
 }
 
-static void cpufreq_interactive_idle_end(void)
+static void cpufreq_thunderstorm_idle_end(void)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu =
+	struct cpufreq_thunderstorm_cpuinfo *pcpu =
 		&per_cpu(cpuinfo, smp_processor_id());
 
 	if (!down_read_trylock(&pcpu->enable_sem))
@@ -656,22 +685,22 @@ static void cpufreq_interactive_idle_end(void)
 
 	/* Arm the timer for 1-2 ticks later if not already. */
 	if (!timer_pending(&pcpu->cpu_timer)) {
-		cpufreq_interactive_timer_resched(pcpu);
+		cpufreq_thunderstorm_timer_resched(pcpu);
 	} else if (time_after_eq(jiffies, pcpu->cpu_timer.expires)) {
 		del_timer(&pcpu->cpu_timer);
 		del_timer(&pcpu->cpu_slack_timer);
-		cpufreq_interactive_timer(smp_processor_id());
+		cpufreq_thunderstorm_timer(smp_processor_id());
 	}
 
 	up_read(&pcpu->enable_sem);
 }
 
-static int cpufreq_interactive_speedchange_task(void *data)
+static int cpufreq_thunderstorm_speedchange_task1(void *data)
 {
 	unsigned int cpu;
 	cpumask_t tmp_mask;
 	unsigned long flags;
-	struct cpufreq_interactive_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
 
 	while (1) {
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -697,7 +726,7 @@ static int cpufreq_interactive_speedchange_task(void *data)
 		for_each_cpu(cpu, &tmp_mask) {
 			unsigned int j;
 			unsigned int max_freq = 0;
-			struct cpufreq_interactive_cpuinfo *pjcpu;
+			struct cpufreq_thunderstorm_cpuinfo *pjcpu;
 			u64 hvt = ~0ULL, fvt = 0;
 
 			pcpu = &per_cpu(cpuinfo, cpu);
@@ -727,7 +756,7 @@ static int cpufreq_interactive_speedchange_task(void *data)
 			if (max_freq != pcpu->policy->cur) {
 				__cpufreq_driver_target(pcpu->policy,
 							max_freq,
-							CPUFREQ_RELATION_C);
+							CPUFREQ_RELATION_L);
 				for_each_cpu(j, pcpu->policy->cpus) {
 					pjcpu = &per_cpu(cpuinfo, j);
 					pjcpu->pol_hispeed_val_time = hvt;
@@ -737,7 +766,7 @@ static int cpufreq_interactive_speedchange_task(void *data)
 #if defined(CONFIG_CPU_THERMAL_IPA)
 			ipa_cpufreq_requested(pcpu->policy, max_freq);
 #endif
-			trace_cpufreq_interactive_setspeed(cpu,
+			trace_cpufreq_thunderstorm_setspeed(cpu,
 						     pcpu->target_freq,
 						     pcpu->policy->cur);
 
@@ -748,12 +777,12 @@ static int cpufreq_interactive_speedchange_task(void *data)
 	return 0;
 }
 
-static void cpufreq_interactive_boost(struct cpufreq_interactive_tunables *tunables)
+static void cpufreq_thunderstorm_boost(struct cpufreq_thunderstorm_tunables *tunables)
 {
 	int i;
 	int anyboost = 0;
 	unsigned long flags[2];
-	struct cpufreq_interactive_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
 	struct cpumask boost_mask;
 	struct cpufreq_policy *policy = container_of(tunables->policy,
 						struct cpufreq_policy, policy);
@@ -769,8 +798,18 @@ static void cpufreq_interactive_boost(struct cpufreq_interactive_tunables *tunab
 
 	for_each_cpu(i, &boost_mask) {
 		pcpu = &per_cpu(cpuinfo, i);
-		if (tunables != pcpu->policy->governor_data)
+		if (!down_read_trylock(&pcpu->enable_sem))
 			continue;
+
+		if (!pcpu->governor_enabled) {
+			up_read(&pcpu->enable_sem);
+			continue;
+		}
+
+		if (tunables != pcpu->policy->governor_data) {
+			up_read(&pcpu->enable_sem);
+			continue;
+		}
 
 		spin_lock_irqsave(&pcpu->target_freq_lock, flags[1]);
 		if (pcpu->target_freq < tunables->hispeed_freq) {
@@ -781,19 +820,21 @@ static void cpufreq_interactive_boost(struct cpufreq_interactive_tunables *tunab
 			anyboost = 1;
 		}
 		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags[1]);
+
+		up_read(&pcpu->enable_sem);
 	}
 
 	spin_unlock_irqrestore(&speedchange_cpumask_lock, flags[0]);
 
-	if (anyboost && speedchange_task)
-		wake_up_process(speedchange_task);
+	if (anyboost && speedchange_task1)
+		wake_up_process(speedchange_task1);
 }
 
-static int cpufreq_interactive_notifier(
+static int cpufreq_thunderstorm_notifier(
 	struct notifier_block *nb, unsigned long val, void *data)
 {
 	struct cpufreq_freqs *freq = data;
-	struct cpufreq_interactive_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
 	int cpu;
 	unsigned long flags;
 
@@ -807,7 +848,7 @@ static int cpufreq_interactive_notifier(
 		}
 
 		for_each_cpu(cpu, pcpu->policy->cpus) {
-			struct cpufreq_interactive_cpuinfo *pjcpu =
+			struct cpufreq_thunderstorm_cpuinfo *pjcpu =
 				&per_cpu(cpuinfo, cpu);
 			if (cpu != freq->cpu) {
 				if (!down_read_trylock(&pjcpu->enable_sem))
@@ -830,7 +871,7 @@ static int cpufreq_interactive_notifier(
 }
 
 static struct notifier_block cpufreq_notifier_block = {
-	.notifier_call = cpufreq_interactive_notifier,
+	.notifier_call = cpufreq_thunderstorm_notifier,
 };
 
 static unsigned int *get_tokenized_data(const char *buf, int *num_tokens)
@@ -879,7 +920,7 @@ err:
 }
 
 static ssize_t show_target_loads(
-	struct cpufreq_interactive_tunables *tunables,
+	struct cpufreq_thunderstorm_tunables *tunables,
 	char *buf)
 {
 	int i;
@@ -907,7 +948,7 @@ static ssize_t show_target_loads(
 }
 
 static ssize_t store_target_loads(
-	struct cpufreq_interactive_tunables *tunables,
+	struct cpufreq_thunderstorm_tunables *tunables,
 	const char *buf, size_t count)
 {
 	int ntokens;
@@ -950,7 +991,7 @@ static ssize_t store_target_loads(
 }
 
 static ssize_t show_above_hispeed_delay(
-	struct cpufreq_interactive_tunables *tunables, char *buf)
+	struct cpufreq_thunderstorm_tunables *tunables, char *buf)
 {
 	int i;
 	ssize_t ret = 0;
@@ -978,7 +1019,7 @@ static ssize_t show_above_hispeed_delay(
 }
 
 static ssize_t store_above_hispeed_delay(
-	struct cpufreq_interactive_tunables *tunables,
+	struct cpufreq_thunderstorm_tunables *tunables,
 	const char *buf, size_t count)
 {
 	int ntokens;
@@ -1021,7 +1062,7 @@ static ssize_t store_above_hispeed_delay(
 
 }
 
-static ssize_t show_hispeed_freq(struct cpufreq_interactive_tunables *tunables,
+static ssize_t show_hispeed_freq(struct cpufreq_thunderstorm_tunables *tunables,
 		char *buf)
 {
 #ifdef CONFIG_DYNAMIC_MODE_SUPPORT
@@ -1031,7 +1072,7 @@ static ssize_t show_hispeed_freq(struct cpufreq_interactive_tunables *tunables,
 #endif
 }
 
-static ssize_t store_hispeed_freq(struct cpufreq_interactive_tunables *tunables,
+static ssize_t store_hispeed_freq(struct cpufreq_thunderstorm_tunables *tunables,
 		const char *buf, size_t count)
 {
 	int ret;
@@ -1061,7 +1102,7 @@ static ssize_t store_hispeed_freq(struct cpufreq_interactive_tunables *tunables,
 	return count;
 }
 
-static ssize_t show_go_hispeed_load(struct cpufreq_interactive_tunables
+static ssize_t show_go_hispeed_load(struct cpufreq_thunderstorm_tunables
 		*tunables, char *buf)
 {
 #ifdef CONFIG_DYNAMIC_MODE_SUPPORT
@@ -1071,7 +1112,7 @@ static ssize_t show_go_hispeed_load(struct cpufreq_interactive_tunables
 #endif
 }
 
-static ssize_t store_go_hispeed_load(struct cpufreq_interactive_tunables
+static ssize_t store_go_hispeed_load(struct cpufreq_thunderstorm_tunables
 		*tunables, const char *buf, size_t count)
 {
 	int ret;
@@ -1101,13 +1142,13 @@ static ssize_t store_go_hispeed_load(struct cpufreq_interactive_tunables
 	return count;
 }
 
-static ssize_t show_min_sample_time(struct cpufreq_interactive_tunables
+static ssize_t show_min_sample_time(struct cpufreq_thunderstorm_tunables
 		*tunables, char *buf)
 {
 	return sprintf(buf, "%lu\n", tunables->min_sample_time);
 }
 
-static ssize_t store_min_sample_time(struct cpufreq_interactive_tunables
+static ssize_t store_min_sample_time(struct cpufreq_thunderstorm_tunables
 		*tunables, const char *buf, size_t count)
 {
 	int ret;
@@ -1120,13 +1161,13 @@ static ssize_t store_min_sample_time(struct cpufreq_interactive_tunables
 	return count;
 }
 
-static ssize_t show_timer_rate(struct cpufreq_interactive_tunables *tunables,
+static ssize_t show_timer_rate(struct cpufreq_thunderstorm_tunables *tunables,
 		char *buf)
 {
 	return sprintf(buf, "%lu\n", tunables->timer_rate);
 }
 
-static ssize_t store_timer_rate(struct cpufreq_interactive_tunables *tunables,
+static ssize_t store_timer_rate(struct cpufreq_thunderstorm_tunables *tunables,
 		const char *buf, size_t count)
 {
 	int ret;
@@ -1145,13 +1186,42 @@ static ssize_t store_timer_rate(struct cpufreq_interactive_tunables *tunables,
 	return count;
 }
 
-static ssize_t show_timer_slack(struct cpufreq_interactive_tunables *tunables,
+// --------------------------------------------
+static ssize_t show_down_low_load_threshold(struct cpufreq_thunderstorm_tunables *tunables,
+		char *buf)
+{
+	return sprintf(buf, "%lu\n", tunables->down_low_load_threshold);
+}
+
+static ssize_t store_down_low_load_threshold(struct cpufreq_thunderstorm_tunables *tunables,
+		const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val, val_round;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0 || ret > 50)
+		return ret;
+
+//	val_round = jiffies_to_usecs(usecs_to_jiffies(val));
+//	val_round = ret + val; // was val
+//	if (val != val_round)
+//		pr_warn("down_low_load_threshold not aligned to jiffy. Rounded up to %lu\n",
+//			val_round);
+
+//	tunables->down_low_load_threshold = val_round;
+	tunables->down_low_load_threshold = val;
+	return count;
+}
+// -------------------------------------------
+
+static ssize_t show_timer_slack(struct cpufreq_thunderstorm_tunables *tunables,
 		char *buf)
 {
 	return sprintf(buf, "%d\n", tunables->timer_slack_val);
 }
 
-static ssize_t store_timer_slack(struct cpufreq_interactive_tunables *tunables,
+static ssize_t store_timer_slack(struct cpufreq_thunderstorm_tunables *tunables,
 		const char *buf, size_t count)
 {
 	int ret;
@@ -1165,13 +1235,13 @@ static ssize_t store_timer_slack(struct cpufreq_interactive_tunables *tunables,
 	return count;
 }
 
-static ssize_t show_boost(struct cpufreq_interactive_tunables *tunables,
+static ssize_t show_boost(struct cpufreq_thunderstorm_tunables *tunables,
 			  char *buf)
 {
 	return sprintf(buf, "%d\n", tunables->boost_val);
 }
 
-static ssize_t store_boost(struct cpufreq_interactive_tunables *tunables,
+static ssize_t store_boost(struct cpufreq_thunderstorm_tunables *tunables,
 			   const char *buf, size_t count)
 {
 	int ret;
@@ -1184,18 +1254,18 @@ static ssize_t store_boost(struct cpufreq_interactive_tunables *tunables,
 	tunables->boost_val = val;
 
 	if (tunables->boost_val) {
-		trace_cpufreq_interactive_boost("on");
+		trace_cpufreq_thunderstorm_boost("on");
 		if (!tunables->boosted)
-			cpufreq_interactive_boost(tunables);
+			cpufreq_thunderstorm_boost(tunables);
 	} else {
 		tunables->boostpulse_endtime = ktime_to_us(ktime_get());
-		trace_cpufreq_interactive_unboost("off");
+		trace_cpufreq_thunderstorm_unboost("off");
 	}
 
 	return count;
 }
 
-static ssize_t store_boostpulse(struct cpufreq_interactive_tunables *tunables,
+static ssize_t store_boostpulse(struct cpufreq_thunderstorm_tunables *tunables,
 				const char *buf, size_t count)
 {
 	int ret;
@@ -1207,19 +1277,19 @@ static ssize_t store_boostpulse(struct cpufreq_interactive_tunables *tunables,
 
 	tunables->boostpulse_endtime = ktime_to_us(ktime_get()) +
 		tunables->boostpulse_duration_val;
-	trace_cpufreq_interactive_boost("pulse");
+	trace_cpufreq_thunderstorm_boost("pulse");
 	if (!tunables->boosted)
-		cpufreq_interactive_boost(tunables);
+		cpufreq_thunderstorm_boost(tunables);
 	return count;
 }
 
-static ssize_t show_boostpulse_duration(struct cpufreq_interactive_tunables
+static ssize_t show_boostpulse_duration(struct cpufreq_thunderstorm_tunables
 		*tunables, char *buf)
 {
 	return sprintf(buf, "%d\n", tunables->boostpulse_duration_val);
 }
 
-static ssize_t store_boostpulse_duration(struct cpufreq_interactive_tunables
+static ssize_t store_boostpulse_duration(struct cpufreq_thunderstorm_tunables
 		*tunables, const char *buf, size_t count)
 {
 	int ret;
@@ -1233,13 +1303,13 @@ static ssize_t store_boostpulse_duration(struct cpufreq_interactive_tunables
 	return count;
 }
 
-static ssize_t show_io_is_busy(struct cpufreq_interactive_tunables *tunables,
+static ssize_t show_io_is_busy(struct cpufreq_thunderstorm_tunables *tunables,
 		char *buf)
 {
 	return sprintf(buf, "%u\n", tunables->io_is_busy);
 }
 
-static ssize_t store_io_is_busy(struct cpufreq_interactive_tunables *tunables,
+static ssize_t store_io_is_busy(struct cpufreq_thunderstorm_tunables *tunables,
 		const char *buf, size_t count)
 {
 	int ret;
@@ -1253,13 +1323,13 @@ static ssize_t store_io_is_busy(struct cpufreq_interactive_tunables *tunables,
 }
 
 #ifdef CONFIG_DYNAMIC_MODE_SUPPORT
-static ssize_t show_mode(struct cpufreq_interactive_tunables
+static ssize_t show_mode(struct cpufreq_thunderstorm_tunables
 		*tunables, char *buf)
 {
 	return sprintf(buf, "%u\n", tunables->mode);
 }
 
-static ssize_t store_mode(struct cpufreq_interactive_tunables
+static ssize_t store_mode(struct cpufreq_thunderstorm_tunables
 		*tunables, const char *buf, size_t count)
 {
 	int ret;
@@ -1276,13 +1346,13 @@ static ssize_t store_mode(struct cpufreq_interactive_tunables
 	tunables->mode = val;
 	return count;
 }
-static ssize_t show_param_index(struct cpufreq_interactive_tunables
+static ssize_t show_param_index(struct cpufreq_thunderstorm_tunables
 		*tunables, char *buf)
 {
 	return sprintf(buf, "%u\n", tunables->param_index);
 }
 
-static ssize_t store_param_index(struct cpufreq_interactive_tunables
+static ssize_t store_param_index(struct cpufreq_thunderstorm_tunables
 		*tunables, const char *buf, size_t count)
 {
 	int ret;
@@ -1348,6 +1418,7 @@ show_store_gov_pol_sys(go_hispeed_load);
 show_store_gov_pol_sys(min_sample_time);
 show_store_gov_pol_sys(timer_rate);
 show_store_gov_pol_sys(timer_slack);
+show_store_gov_pol_sys(down_low_load_threshold);
 show_store_gov_pol_sys(boost);
 store_gov_pol_sys(boostpulse);
 show_store_gov_pol_sys(boostpulse_duration);
@@ -1375,6 +1446,7 @@ gov_sys_pol_attr_rw(hispeed_freq);
 gov_sys_pol_attr_rw(go_hispeed_load);
 gov_sys_pol_attr_rw(min_sample_time);
 gov_sys_pol_attr_rw(timer_rate);
+gov_sys_pol_attr_rw(down_low_load_threshold);
 gov_sys_pol_attr_rw(timer_slack);
 gov_sys_pol_attr_rw(boost);
 gov_sys_pol_attr_rw(boostpulse_duration);
@@ -1391,13 +1463,14 @@ static struct freq_attr boostpulse_gov_pol =
 	__ATTR(boostpulse, 0200, NULL, store_boostpulse_gov_pol);
 
 /* One Governor instance for entire system */
-static struct attribute *interactive_attributes_gov_sys[] = {
+static struct attribute *thunderstorm_attributes_gov_sys[] = {
 	&target_loads_gov_sys.attr,
 	&above_hispeed_delay_gov_sys.attr,
 	&hispeed_freq_gov_sys.attr,
 	&go_hispeed_load_gov_sys.attr,
 	&min_sample_time_gov_sys.attr,
 	&timer_rate_gov_sys.attr,
+	&down_low_load_threshold_gov_sys.attr,
 	&timer_slack_gov_sys.attr,
 	&boost_gov_sys.attr,
 	&boostpulse_gov_sys.attr,
@@ -1410,16 +1483,16 @@ static struct attribute *interactive_attributes_gov_sys[] = {
 	NULL,
 };
 
-static struct attribute_group interactive_attr_group_gov_sys = {
-	.attrs = interactive_attributes_gov_sys,
-	.name = "interactive",
+static struct attribute_group thunderstorm_attr_group_gov_sys = {
+	.attrs = thunderstorm_attributes_gov_sys,
+	.name = "thunderstorm",
 };
 
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
 static ssize_t show_exynos_fb_target_loads_dual(
 	struct cpufreq_policy *policy, char *buf)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
 	unsigned long flags;
 	ssize_t ret = 0;
 	int i;
@@ -1442,7 +1515,7 @@ static ssize_t show_exynos_fb_target_loads_dual(
 static ssize_t show_exynos_fb_target_loads_quad(
 	struct cpufreq_policy *policy, char *buf)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
 	unsigned long flags;
 	ssize_t ret = 0;
 	int i;
@@ -1465,8 +1538,8 @@ static ssize_t show_exynos_fb_target_loads_quad(
 static ssize_t store_exynos_fb_target_loads_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned int *new_target_loads = NULL;
 	unsigned long flags;
 	int ntokens;
@@ -1498,8 +1571,8 @@ static ssize_t store_exynos_fb_target_loads_dual(
 static ssize_t store_exynos_fb_target_loads_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned int *new_target_loads = NULL;
 	unsigned long flags;
 	int ntokens;
@@ -1530,7 +1603,7 @@ static ssize_t store_exynos_fb_target_loads_quad(
 static ssize_t show_exynos_fb_above_hispeed_delay_dual(
 	struct cpufreq_policy *policy, char *buf)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
 	unsigned long flags;
 	ssize_t ret = 0;
 	int i;
@@ -1553,7 +1626,7 @@ static ssize_t show_exynos_fb_above_hispeed_delay_dual(
 static ssize_t show_exynos_fb_above_hispeed_delay_quad(
 	struct cpufreq_policy *policy, char *buf)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
 	unsigned long flags;
 	ssize_t ret = 0;
 	int i;
@@ -1576,8 +1649,8 @@ static ssize_t show_exynos_fb_above_hispeed_delay_quad(
 static ssize_t store_exynos_fb_above_hispeed_delay_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned int *new_above_hispeed_delay = NULL;
 	unsigned long flags;
 	int ntokens;
@@ -1609,8 +1682,8 @@ static ssize_t store_exynos_fb_above_hispeed_delay_dual(
 static ssize_t store_exynos_fb_above_hispeed_delay_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned int *new_above_hispeed_delay = NULL;
 	unsigned long flags;
 	int ntokens;
@@ -1660,8 +1733,8 @@ static ssize_t show_exynos_fb_hispeed_freq_2nd_dual(
 static ssize_t store_exynos_fb_hispeed_freq_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1686,8 +1759,8 @@ static ssize_t store_exynos_fb_hispeed_freq_dual(
 static ssize_t store_exynos_fb_hispeed_freq_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1712,8 +1785,8 @@ static ssize_t store_exynos_fb_hispeed_freq_quad(
 static ssize_t store_exynos_fb_hispeed_freq_2nd_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1750,8 +1823,8 @@ static ssize_t show_exynos_fb_go_hispeed_load_quad(
 static ssize_t store_exynos_fb_go_hispeed_load_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1776,8 +1849,8 @@ static ssize_t store_exynos_fb_go_hispeed_load_dual(
 static ssize_t store_exynos_fb_go_hispeed_load_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1814,8 +1887,8 @@ static ssize_t show_exynos_fb_min_sample_time_quad(
 static ssize_t store_exynos_fb_min_sample_time_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1840,8 +1913,8 @@ static ssize_t store_exynos_fb_min_sample_time_dual(
 static ssize_t store_exynos_fb_min_sample_time_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1878,8 +1951,8 @@ static ssize_t show_exynos_fb_timer_rate_quad(
 static ssize_t store_exynos_fb_timer_rate_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val, val_round;
 	int ret;
@@ -1909,8 +1982,8 @@ static ssize_t store_exynos_fb_timer_rate_dual(
 static ssize_t store_exynos_fb_timer_rate_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val, val_round;
 	int ret;
@@ -1937,6 +2010,92 @@ static ssize_t store_exynos_fb_timer_rate_quad(
 	return count;
 }
 
+// -------------------------------------------------
+static ssize_t show_exynos_fb_down_low_load_threshold_dual(
+	struct cpufreq_policy *policy, char *buf)
+{
+	return sprintf(buf, "%lu\n", exynos_fb_param[DUAL_MODE]->down_low_load_threshold);;
+}
+
+static ssize_t show_exynos_fb_down_low_load_threshold_quad(
+	struct cpufreq_policy *policy, char *buf)
+{
+	return sprintf(buf, "%lu\n", exynos_fb_param[QUAD_MODE]->down_low_load_threshold);;
+}
+
+static ssize_t store_exynos_fb_down_low_load_threshold_dual(
+	struct cpufreq_policy *policy, const char *buf, size_t count)
+{
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
+	unsigned long flags;
+	long unsigned int val, val_round;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0 || ret > 50)
+		return ret;
+
+//	val_round = jiffies_to_usecs(usecs_to_jiffies(val));
+	val_round = val; // was val or ret
+//	if (val != val_round)
+//		pr_warn("down_low_load_threshold not aligned to jiffy. Rounded up to %lu\n",
+//			val_round);
+
+	spin_lock_irqsave(&exynos_fb_lock, flags);
+
+	exynos_fb_tunables = exynos_fb_param[DUAL_MODE];
+	exynos_fb_tunables->down_low_load_threshold = val;
+
+	if (tunables->mode_idx == DUAL_MODE)
+		tunables->down_low_load_threshold = val;
+
+	spin_unlock_irqrestore(&exynos_fb_lock, flags);
+
+	return count;
+}
+
+static ssize_t store_exynos_fb_down_low_load_threshold_quad(
+	struct cpufreq_policy *policy, const char *buf, size_t count)
+{
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
+	unsigned long flags;
+	long unsigned int val, val_round;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0 || ret > 50)
+//	val_round = ret + val; // was val
+		return ret;
+
+
+//	val_round = jiffies_to_usecs(usecs_to_jiffies(val));
+	val_round = val; // was val or ret or val + ret
+//	val_round = ret;	   
+
+//	else if (ret > 50)
+//	val_round = 50; // was val
+//		return ret;
+
+//	if (val != val_round)
+//		pr_warn("down_low_load_threshold not aligned to jiffy. Rounded up to %lu\n",
+//			val_round);
+
+	spin_lock_irqsave(&exynos_fb_lock, flags);
+
+	exynos_fb_tunables = exynos_fb_param[QUAD_MODE];
+	exynos_fb_tunables->down_low_load_threshold = val;
+
+	if (tunables->mode_idx == QUAD_MODE)
+		tunables->down_low_load_threshold = val;
+
+	spin_unlock_irqrestore(&exynos_fb_lock, flags);
+
+	return count;
+}
+// --------------------------------------
+
 static ssize_t show_exynos_fb_timer_slack_dual(
 	struct cpufreq_policy *policy, char *buf)
 {
@@ -1952,8 +2111,8 @@ static ssize_t show_exynos_fb_timer_slack_quad(
 static ssize_t store_exynos_fb_timer_slack_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -1978,8 +2137,8 @@ static ssize_t store_exynos_fb_timer_slack_dual(
 static ssize_t store_exynos_fb_timer_slack_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2016,8 +2175,8 @@ static ssize_t show_exynos_fb_boost_quad(
 static ssize_t store_exynos_fb_boost_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2035,12 +2194,12 @@ static ssize_t store_exynos_fb_boost_dual(
 		tunables->boost_val = val;
 
 		if (tunables->boost_val) {
-			trace_cpufreq_interactive_boost("on");
+			trace_cpufreq_thunderstorm_boost("on");
 			if (!tunables->boosted)
-				cpufreq_interactive_boost(tunables);
+				cpufreq_thunderstorm_boost(tunables);
 		} else {
 			tunables->boostpulse_endtime = ktime_to_us(ktime_get());
-			trace_cpufreq_interactive_unboost("off");
+			trace_cpufreq_thunderstorm_unboost("off");
 		}
 	}
 
@@ -2052,8 +2211,8 @@ static ssize_t store_exynos_fb_boost_dual(
 static ssize_t store_exynos_fb_boost_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2071,12 +2230,12 @@ static ssize_t store_exynos_fb_boost_quad(
 		tunables->boost_val = val;
 
 		if (tunables->boost_val) {
-			trace_cpufreq_interactive_boost("on");
+			trace_cpufreq_thunderstorm_boost("on");
 			if (!tunables->boosted)
-				cpufreq_interactive_boost(tunables);
+				cpufreq_thunderstorm_boost(tunables);
 		} else {
 			tunables->boostpulse_endtime = ktime_to_us(ktime_get());
-			trace_cpufreq_interactive_unboost("off");
+			trace_cpufreq_thunderstorm_unboost("off");
 		}
 	}
 
@@ -2088,8 +2247,8 @@ static ssize_t store_exynos_fb_boost_quad(
 static ssize_t store_exynos_fb_boostpulse_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2108,9 +2267,9 @@ static ssize_t store_exynos_fb_boostpulse_dual(
 		tunables->boostpulse_endtime = ktime_to_us(ktime_get()) +
 					tunables->boostpulse_duration_val;
 
-		trace_cpufreq_interactive_boost("pulse");
+		trace_cpufreq_thunderstorm_boost("pulse");
 		if (!tunables->boosted)
-			cpufreq_interactive_boost(tunables);
+			cpufreq_thunderstorm_boost(tunables);
 	}
 
 	spin_unlock_irqrestore(&exynos_fb_lock, flags);
@@ -2121,8 +2280,8 @@ static ssize_t store_exynos_fb_boostpulse_dual(
 static ssize_t store_exynos_fb_boostpulse_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2141,9 +2300,9 @@ static ssize_t store_exynos_fb_boostpulse_quad(
 		tunables->boostpulse_endtime = ktime_to_us(ktime_get()) +
 					tunables->boostpulse_duration_val;
 
-		trace_cpufreq_interactive_boost("pulse");
+		trace_cpufreq_thunderstorm_boost("pulse");
 		if (!tunables->boosted)
-			cpufreq_interactive_boost(tunables);
+			cpufreq_thunderstorm_boost(tunables);
 	}
 
 	spin_unlock_irqrestore(&exynos_fb_lock, flags);
@@ -2167,8 +2326,8 @@ static ssize_t show_exynos_fb_boostpulse_duration_quad(
 static ssize_t store_exynos_fb_boostpulse_duration_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2193,8 +2352,8 @@ static ssize_t store_exynos_fb_boostpulse_duration_dual(
 static ssize_t store_exynos_fb_boostpulse_duration_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2231,8 +2390,8 @@ static ssize_t show_exynos_fb_io_is_busy_quad(
 static ssize_t store_exynos_fb_io_is_busy_dual(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2257,8 +2416,8 @@ static ssize_t store_exynos_fb_io_is_busy_dual(
 static ssize_t store_exynos_fb_io_is_busy_quad(
 	struct cpufreq_policy *policy, const char *buf, size_t count)
 {
-	struct cpufreq_interactive_tunables *exynos_fb_tunables;
-	struct cpufreq_interactive_tunables *tunables = policy->governor_data;
+	struct cpufreq_thunderstorm_tunables *exynos_fb_tunables;
+	struct cpufreq_thunderstorm_tunables *tunables = policy->governor_data;
 	unsigned long flags;
 	long unsigned int val;
 	int ret;
@@ -2305,6 +2464,7 @@ exynos_fb_show_store(hispeed_freq_2nd_dual);
 exynos_fb_show_store(go_hispeed_load_dual);
 exynos_fb_show_store(min_sample_time_dual);
 exynos_fb_show_store(timer_rate_dual);
+exynos_fb_show_store(down_low_load_threshold_dual);
 exynos_fb_show_store(timer_slack_dual);
 exynos_fb_show_store(boost_dual);
 exynos_fb_store_one(boostpulse_dual);
@@ -2317,6 +2477,7 @@ exynos_fb_show_store(hispeed_freq_quad);
 exynos_fb_show_store(go_hispeed_load_quad);
 exynos_fb_show_store(min_sample_time_quad);
 exynos_fb_show_store(timer_rate_quad);
+exynos_fb_show_store(down_low_load_threshold_quad);
 exynos_fb_show_store(timer_slack_quad);
 exynos_fb_show_store(boost_quad);
 exynos_fb_store_one(boostpulse_quad);
@@ -2340,6 +2501,7 @@ exynos_fb_attr_rw_dual(hispeed_freq_2nd);
 exynos_fb_attr_rw_dual(go_hispeed_load);
 exynos_fb_attr_rw_dual(min_sample_time);
 exynos_fb_attr_rw_dual(timer_rate);
+exynos_fb_attr_rw_dual(down_low_load_threshold);
 exynos_fb_attr_rw_dual(timer_slack);
 exynos_fb_attr_rw_dual(boost);
 exynos_fb_attr_rw_dual(boostpulse_duration);
@@ -2351,6 +2513,7 @@ exynos_fb_attr_rw_quad(hispeed_freq);
 exynos_fb_attr_rw_quad(go_hispeed_load);
 exynos_fb_attr_rw_quad(min_sample_time);
 exynos_fb_attr_rw_quad(timer_rate);
+exynos_fb_attr_rw_quad(down_low_load_threshold);
 exynos_fb_attr_rw_quad(timer_slack);
 exynos_fb_attr_rw_quad(boost);
 exynos_fb_attr_rw_quad(boostpulse_duration);
@@ -2370,6 +2533,7 @@ static struct attribute *exynos_fb_dual_attrs[] = {
 	&go_hispeed_load_dual.attr,
 	&min_sample_time_dual.attr,
 	&timer_rate_dual.attr,
+	&down_low_load_threshold_dual.attr,
 	&timer_slack_dual.attr,
 	&boost_dual.attr,
 	&boostpulse_dual.attr,
@@ -2385,6 +2549,7 @@ static struct attribute *exynos_fb_quad_attrs[] = {
 	&go_hispeed_load_quad.attr,
 	&min_sample_time_quad.attr,
 	&timer_rate_quad.attr,
+	&down_low_load_threshold_quad.attr,
 	&timer_slack_quad.attr,
 	&boost_quad.attr,
 	&boostpulse_quad.attr,
@@ -2463,13 +2628,14 @@ static struct kobj_type exynos_fb_ktype_quad = {
 #endif
 
 /* Per policy governor instance */
-static struct attribute *interactive_attributes_gov_pol[] = {
+static struct attribute *thunderstorm_attributes_gov_pol[] = {
 	&target_loads_gov_pol.attr,
 	&above_hispeed_delay_gov_pol.attr,
 	&hispeed_freq_gov_pol.attr,
 	&go_hispeed_load_gov_pol.attr,
 	&min_sample_time_gov_pol.attr,
 	&timer_rate_gov_pol.attr,
+	&down_low_load_threshold_gov_pol.attr,
 	&timer_slack_gov_pol.attr,
 	&boost_gov_pol.attr,
 	&boostpulse_gov_pol.attr,
@@ -2482,35 +2648,35 @@ static struct attribute *interactive_attributes_gov_pol[] = {
 	NULL,
 };
 
-static struct attribute_group interactive_attr_group_gov_pol = {
-	.attrs = interactive_attributes_gov_pol,
-	.name = "interactive",
+static struct attribute_group thunderstorm_attr_group_gov_pol = {
+	.attrs = thunderstorm_attributes_gov_pol,
+	.name = "thunderstorm",
 };
 
 static struct attribute_group *get_sysfs_attr(void)
 {
 	if (have_governor_per_policy())
-		return &interactive_attr_group_gov_pol;
+		return &thunderstorm_attr_group_gov_pol;
 	else
-		return &interactive_attr_group_gov_sys;
+		return &thunderstorm_attr_group_gov_sys;
 }
 
-static int cpufreq_interactive_idle_notifier(struct notifier_block *nb,
+static int cpufreq_thunderstorm_idle_notifier(struct notifier_block *nb,
 					     unsigned long val,
 					     void *data)
 {
 	if (val == IDLE_END)
-		cpufreq_interactive_idle_end();
+		cpufreq_thunderstorm_idle_end();
 
 	return 0;
 }
 
-static struct notifier_block cpufreq_interactive_idle_nb = {
-	.notifier_call = cpufreq_interactive_idle_notifier,
+static struct notifier_block cpufreq_thunderstorm_idle_nb = {
+	.notifier_call = cpufreq_thunderstorm_idle_notifier,
 };
 
 #ifdef CONFIG_DYNAMIC_MODE_SUPPORT
-static void cpufreq_param_set_init(struct cpufreq_interactive_tunables *tunables)
+static void cpufreq_param_set_init(struct cpufreq_thunderstorm_tunables *tunables)
 {
 	unsigned int i;
 
@@ -2526,14 +2692,14 @@ static void cpufreq_param_set_init(struct cpufreq_interactive_tunables *tunables
 }
 #endif
 
-static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
+static int cpufreq_governor_thunderstorm(struct cpufreq_policy *policy,
 		unsigned int event)
 {
 	int rc;
 	unsigned int j;
-	struct cpufreq_interactive_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
 	struct cpufreq_frequency_table *freq_table;
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_tunables *tunables;
 	unsigned long flags;
 
 	if (have_governor_per_policy())
@@ -2568,6 +2734,8 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			tunables->ntarget_loads = ARRAY_SIZE(default_target_loads);
 			tunables->min_sample_time = DEFAULT_MIN_SAMPLE_TIME;
 			tunables->timer_rate = DEFAULT_TIMER_RATE;
+			tunables->prev_timer_rate = DEFAULT_TIMER_RATE;
+			tunables->down_low_load_threshold = DEFAULT_DOWN_LOW_LOAD_THRESHOLD;
 			tunables->boostpulse_duration_val = DEFAULT_MIN_SAMPLE_TIME;
 			tunables->timer_slack_val = DEFAULT_TIMER_SLACK;
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
@@ -2582,6 +2750,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 					exynos_fb_param[j]->ntarget_loads = ARRAY_SIZE(default_target_loads);
 					exynos_fb_param[j]->min_sample_time = DEFAULT_MIN_SAMPLE_TIME;
 					exynos_fb_param[j]->timer_rate = DEFAULT_TIMER_RATE;
+					exynos_fb_param[j]->down_low_load_threshold = DEFAULT_DOWN_LOW_LOAD_THRESHOLD;
 					exynos_fb_param[j]->boostpulse_duration_val = DEFAULT_MIN_SAMPLE_TIME;
 					exynos_fb_param[j]->timer_slack_val = DEFAULT_TIMER_SLACK;
 				}
@@ -2634,7 +2803,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		}
 
 		if (!policy->governor->initialized) {
-			idle_notifier_register(&cpufreq_interactive_idle_nb);
+			idle_notifier_register(&cpufreq_thunderstorm_idle_nb);
 			cpufreq_register_notifier(&cpufreq_notifier_block,
 					CPUFREQ_TRANSITION_NOTIFIER);
 		}
@@ -2646,7 +2815,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			if (policy->governor->initialized == 1) {
 				cpufreq_unregister_notifier(&cpufreq_notifier_block,
 						CPUFREQ_TRANSITION_NOTIFIER);
-				idle_notifier_unregister(&cpufreq_interactive_idle_nb);
+				idle_notifier_unregister(&cpufreq_thunderstorm_idle_nb);
 			}
 
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
@@ -2699,7 +2868,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			down_write(&pcpu->enable_sem);
 			del_timer_sync(&pcpu->cpu_timer);
 			del_timer_sync(&pcpu->cpu_slack_timer);
-			cpufreq_interactive_timer_start(tunables, j);
+			cpufreq_thunderstorm_timer_start(tunables, j);
 			pcpu->governor_enabled = 1;
 			up_write(&pcpu->enable_sem);
 		}
@@ -2751,25 +2920,25 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 	return 0;
 }
 
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_THUNDERSTORM
 static
 #endif
-struct cpufreq_governor cpufreq_gov_interactive = {
-	.name = "interactive",
-	.governor = cpufreq_governor_interactive,
+struct cpufreq_governor cpufreq_gov_thunderstorm = {
+	.name = "thunderstorm",
+	.governor = cpufreq_governor_thunderstorm,
 	.max_transition_latency = 10000000,
 	.owner = THIS_MODULE,
 };
 
-static void cpufreq_interactive_nop_timer(unsigned long data)
+static void cpufreq_thunderstorm_nop_timer(unsigned long data)
 {
 }
 
-unsigned int cpufreq_interactive_get_hispeed_freq(int cpu)
+unsigned int cpufreq_thunderstorm_get_hispeed_freq(int cpu)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu =
+	struct cpufreq_thunderstorm_cpuinfo *pcpu =
 			&per_cpu(cpuinfo, cpu);
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_tunables *tunables;
 
 	if (pcpu && pcpu->policy)
 		tunables = pcpu->policy->governor_data;
@@ -2799,7 +2968,7 @@ static int exynos_fb_kobject_create(struct cpufreq_policy *policy)
 	}
 
 	ret = kobject_init_and_add(exynos_fb_kobj[QUAD_MODE], &exynos_fb_ktype_quad,
-				get_governor_parent_kobj(policy), "interactive");
+				get_governor_parent_kobj(policy), "thunderstorm");
 	if (ret) {
 		pr_err("%s: Failed to init kobject for quad.\n", __func__);
 		ret = -ENOENT;
@@ -2836,9 +3005,9 @@ static void exynos_fb_kobject_remove(void)
 }
 
 static void exynos_update_gov_param(
-		struct cpufreq_interactive_tunables *params, int idx)
+		struct cpufreq_thunderstorm_tunables *params, int idx)
 {
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_tunables *tunables;
 	struct cpufreq_policy *policy = container_of(params->policy,
 					struct cpufreq_policy, policy);
 	unsigned long flags;
@@ -2858,6 +3027,7 @@ static void exynos_update_gov_param(
 	tunables->go_hispeed_load = params->go_hispeed_load;
 	tunables->min_sample_time = params->min_sample_time;
 	tunables->timer_rate = params->timer_rate;
+	tunables->down_low_load_threshold = params->down_low_load_threshold;
 	tunables->ntarget_loads = params->ntarget_loads;
 	tunables->above_hispeed_delay = params->above_hispeed_delay;
 	tunables->nabove_hispeed_delay = params->nabove_hispeed_delay;
@@ -2899,11 +3069,11 @@ static struct notifier_block exynos_tuned_param_update_nb = {
 #endif
 
 #ifdef CONFIG_ARCH_EXYNOS
-static int cpufreq_interactive_cluster1_min_qos_handler(struct notifier_block *b,
+static int cpufreq_thunderstorm_cluster1_min_qos_handler(struct notifier_block *b,
 						unsigned long val, void *v)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu;
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_tunables *tunables;
 	unsigned long flags;
 	int ret = NOTIFY_OK;
 #if defined(CONFIG_ARM_EXYNOS_MP_CPUFREQ)
@@ -2929,7 +3099,7 @@ static int cpufreq_interactive_cluster1_min_qos_handler(struct notifier_block *b
 		goto exit;
 	}
 
-	trace_cpufreq_interactive_cpu_min_qos(cpu, val, pcpu->policy->cur);
+	trace_cpufreq_thunderstorm_cpu_min_qos(cpu, val, pcpu->policy->cur);
 
 	if (val < pcpu->policy->cur) {
 		tunables = pcpu->policy->governor_data;
@@ -2938,23 +3108,23 @@ static int cpufreq_interactive_cluster1_min_qos_handler(struct notifier_block *b
 		cpumask_set_cpu(cpu, &speedchange_cpumask);
 		spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
 
-		if (speedchange_task)
-			wake_up_process(speedchange_task);
+		if (speedchange_task1)
+			wake_up_process(speedchange_task1);
 	}
 exit:
 	mutex_unlock(&gov_lock);
 	return ret;
 }
 
-static struct notifier_block cpufreq_interactive_cluster1_min_qos_notifier = {
-	.notifier_call = cpufreq_interactive_cluster1_min_qos_handler,
+static struct notifier_block cpufreq_thunderstorm_cluster1_min_qos_notifier = {
+	.notifier_call = cpufreq_thunderstorm_cluster1_min_qos_handler,
 };
 
-static int cpufreq_interactive_cluster1_max_qos_handler(struct notifier_block *b,
+static int cpufreq_thunderstorm_cluster1_max_qos_handler(struct notifier_block *b,
 						unsigned long val, void *v)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu;
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_tunables *tunables;
 	unsigned long flags;
 	int ret = NOTIFY_OK;
 #if defined(CONFIG_ARM_EXYNOS_MP_CPUFREQ)
@@ -2980,7 +3150,7 @@ static int cpufreq_interactive_cluster1_max_qos_handler(struct notifier_block *b
 		goto exit;
 	}
 
-	trace_cpufreq_interactive_cpu_max_qos(cpu, val, pcpu->policy->cur);
+	trace_cpufreq_thunderstorm_cpu_max_qos(cpu, val, pcpu->policy->cur);
 
 	if (val > pcpu->policy->cur) {
 		tunables = pcpu->policy->governor_data;
@@ -2989,24 +3159,24 @@ static int cpufreq_interactive_cluster1_max_qos_handler(struct notifier_block *b
 		cpumask_set_cpu(cpu, &speedchange_cpumask);
 		spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
 
-		if (speedchange_task)
-			wake_up_process(speedchange_task);
+		if (speedchange_task1)
+			wake_up_process(speedchange_task1);
 	}
 exit:
 	mutex_unlock(&gov_lock);
 	return ret;
 }
 
-static struct notifier_block cpufreq_interactive_cluster1_max_qos_notifier = {
-	.notifier_call = cpufreq_interactive_cluster1_max_qos_handler,
+static struct notifier_block cpufreq_thunderstorm_cluster1_max_qos_notifier = {
+	.notifier_call = cpufreq_thunderstorm_cluster1_max_qos_handler,
 };
 
 #ifdef CONFIG_ARM_EXYNOS_MP_CPUFREQ
-static int cpufreq_interactive_cluster0_min_qos_handler(struct notifier_block *b,
+static int cpufreq_thunderstorm_cluster0_min_qos_handler(struct notifier_block *b,
 						unsigned long val, void *v)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu;
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_tunables *tunables;
 	unsigned long flags;
 	int ret = NOTIFY_OK;
 
@@ -3027,7 +3197,7 @@ static int cpufreq_interactive_cluster0_min_qos_handler(struct notifier_block *b
 		goto exit;
 	}
 
-	trace_cpufreq_interactive_kfc_min_qos(0, val, pcpu->policy->cur);
+	trace_cpufreq_thunderstorm_kfc_min_qos(0, val, pcpu->policy->cur);
 
 	if (val < pcpu->policy->cur) {
 		tunables = pcpu->policy->governor_data;
@@ -3036,23 +3206,23 @@ static int cpufreq_interactive_cluster0_min_qos_handler(struct notifier_block *b
 		cpumask_set_cpu(0, &speedchange_cpumask);
 		spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
 
-		if (speedchange_task)
-			wake_up_process(speedchange_task);
+		if (speedchange_task1)
+			wake_up_process(speedchange_task1);
 	}
 exit:
 	mutex_unlock(&gov_lock);
 	return ret;
 }
 
-static struct notifier_block cpufreq_interactive_cluster0_min_qos_notifier = {
-	.notifier_call = cpufreq_interactive_cluster0_min_qos_handler,
+static struct notifier_block cpufreq_thunderstorm_cluster0_min_qos_notifier = {
+	.notifier_call = cpufreq_thunderstorm_cluster0_min_qos_handler,
 };
 
-static int cpufreq_interactive_cluster0_max_qos_handler(struct notifier_block *b,
+static int cpufreq_thunderstorm_cluster0_max_qos_handler(struct notifier_block *b,
 						unsigned long val, void *v)
 {
-	struct cpufreq_interactive_cpuinfo *pcpu;
-	struct cpufreq_interactive_tunables *tunables;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_tunables *tunables;
 	unsigned long flags;
 	int ret = NOTIFY_OK;
 
@@ -3073,7 +3243,7 @@ static int cpufreq_interactive_cluster0_max_qos_handler(struct notifier_block *b
 		goto exit;
 	}
 
-	trace_cpufreq_interactive_kfc_max_qos(0, val, pcpu->policy->cur);
+	trace_cpufreq_thunderstorm_kfc_max_qos(0, val, pcpu->policy->cur);
 
 	if (val > pcpu->policy->cur) {
 		tunables = pcpu->policy->governor_data;
@@ -3082,33 +3252,34 @@ static int cpufreq_interactive_cluster0_max_qos_handler(struct notifier_block *b
 		cpumask_set_cpu(0, &speedchange_cpumask);
 		spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
 
-		if (speedchange_task)
-			wake_up_process(speedchange_task);
+		if (speedchange_task1)
+			wake_up_process(speedchange_task1);
 	}
 exit:
 	mutex_unlock(&gov_lock);
 	return ret;
 }
 
-static struct notifier_block cpufreq_interactive_cluster0_max_qos_notifier = {
-	.notifier_call = cpufreq_interactive_cluster0_max_qos_handler,
+static struct notifier_block cpufreq_thunderstorm_cluster0_max_qos_notifier = {
+	.notifier_call = cpufreq_thunderstorm_cluster0_max_qos_handler,
 };
 #endif
 #endif
 
-static int __init cpufreq_interactive_init(void)
+static int __init cpufreq_thunderstorm_init(void)
 {
 	unsigned int i;
-	struct cpufreq_interactive_cpuinfo *pcpu;
+	struct cpufreq_thunderstorm_cpuinfo *pcpu;
+//	screen_on = true;
 
 	/* Initalize per-cpu timers */
 	for_each_possible_cpu(i) {
 		pcpu = &per_cpu(cpuinfo, i);
 		init_timer_deferrable(&pcpu->cpu_timer);
-		pcpu->cpu_timer.function = cpufreq_interactive_timer;
+		pcpu->cpu_timer.function = cpufreq_thunderstorm_timer;
 		pcpu->cpu_timer.data = i;
 		init_timer(&pcpu->cpu_slack_timer);
-		pcpu->cpu_slack_timer.function = cpufreq_interactive_nop_timer;
+		pcpu->cpu_slack_timer.function = cpufreq_thunderstorm_nop_timer;
 		spin_lock_init(&pcpu->load_lock);
 		spin_lock_init(&pcpu->target_freq_lock);
 		init_rwsem(&pcpu->enable_sem);
@@ -3117,48 +3288,49 @@ static int __init cpufreq_interactive_init(void)
 	spin_lock_init(&speedchange_cpumask_lock);
 	mutex_init(&gov_lock);
 
-	speedchange_task =
-		kthread_create(cpufreq_interactive_speedchange_task, NULL,
-				"cfinteractive");
-	if (IS_ERR(speedchange_task))
-		return PTR_ERR(speedchange_task);
+	speedchange_task1 =
+		kthread_create(cpufreq_thunderstorm_speedchange_task1, NULL,
+				"cfthunderstorm");
+	if (IS_ERR(speedchange_task1))
+		return PTR_ERR(speedchange_task1);
 
-	kthread_bind(speedchange_task, 0);
+	kthread_bind(speedchange_task1, 0);
 
 #ifdef CONFIG_ARCH_EXYNOS
-	pm_qos_add_notifier(PM_QOS_CLUSTER1_FREQ_MIN, &cpufreq_interactive_cluster1_min_qos_notifier);
-	pm_qos_add_notifier(PM_QOS_CLUSTER1_FREQ_MAX, &cpufreq_interactive_cluster1_max_qos_notifier);
+	pm_qos_add_notifier(PM_QOS_CLUSTER1_FREQ_MIN, &cpufreq_thunderstorm_cluster1_min_qos_notifier);
+	pm_qos_add_notifier(PM_QOS_CLUSTER1_FREQ_MAX, &cpufreq_thunderstorm_cluster1_max_qos_notifier);
 #ifdef CONFIG_ARM_EXYNOS_MP_CPUFREQ
-	pm_qos_add_notifier(PM_QOS_CLUSTER0_FREQ_MIN, &cpufreq_interactive_cluster0_min_qos_notifier);
-	pm_qos_add_notifier(PM_QOS_CLUSTER0_FREQ_MAX, &cpufreq_interactive_cluster0_max_qos_notifier);
+	pm_qos_add_notifier(PM_QOS_CLUSTER0_FREQ_MIN, &cpufreq_thunderstorm_cluster0_min_qos_notifier);
+	pm_qos_add_notifier(PM_QOS_CLUSTER0_FREQ_MAX, &cpufreq_thunderstorm_cluster0_max_qos_notifier);
 #endif
 #endif
 
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
 	for (i = 0; i < NR_MODE; i++)
-		exynos_fb_param[i] = kzalloc(sizeof(struct cpufreq_interactive_tunables),
+		exynos_fb_param[i] = kzalloc(sizeof(struct cpufreq_thunderstorm_tunables),
 					     GFP_KERNEL);
 
 	register_cpu_notifier(&exynos_tuned_param_update_nb);
 #endif
 
-	return cpufreq_register_governor(&cpufreq_gov_interactive);
+	return cpufreq_register_governor(&cpufreq_gov_thunderstorm);
 }
 
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
-fs_initcall(cpufreq_interactive_init);
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_THUNDERSTORM
+fs_initcall(cpufreq_thunderstorm_init);
 #else
-module_init(cpufreq_interactive_init);
+module_init(cpufreq_thunderstorm_init);
 #endif
 
-static void __exit cpufreq_interactive_exit(void)
+static void __exit cpufreq_thunderstorm_exit(void)
 {
-	cpufreq_unregister_governor(&cpufreq_gov_interactive);
+	cpufreq_unregister_governor(&cpufreq_gov_thunderstorm);
 }
 
-module_exit(cpufreq_interactive_exit);
+module_exit(cpufreq_thunderstorm_exit);
 
 MODULE_AUTHOR("Mike Chan <mike@android.com>");
-MODULE_DESCRIPTION("'cpufreq_interactive' - A cpufreq governor for "
+MODULE_AUTHOR("edited by @nalas XDA");
+MODULE_DESCRIPTION("'cpufreq_thunderstorm' - A cpufreq governor for "
 	"Latency sensitive workloads");
 MODULE_LICENSE("GPL");
