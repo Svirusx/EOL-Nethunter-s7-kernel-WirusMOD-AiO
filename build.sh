@@ -31,7 +31,7 @@ DEFCONFIG_S7FLAT=moro-flat_defconfig
 
 K_VERSION="v2.2"
 K_SUBVER="8"
-K_BASE="CTD2"
+K_BASE="CTH1"
 K_NAME="Nethunter_WirusMOD"
 export KBUILD_BUILD_VERSION="1"
 
@@ -92,7 +92,6 @@ FUNC_BUILD_KERNEL()
 	if [[ $OS == "twQ" ]]; then
 		sed -i '/CONFIG_HALL_EVENT_REVERSE/c\CONFIG_HALL_EVENT_REVERSE=y' $RDIR/arch/$ARCH/configs/tmp_defconfig
 	fi
-
 
 	make -j$BUILD_JOB_NUMBER ARCH=$ARCH \
 			CROSS_COMPILE=$BUILD_CROSS_COMPILE \
@@ -363,11 +362,11 @@ elif [[ $prompt == "5" ]]; then
     echo "S7 Flat - Lineage 17 Selected"
 
     OS=los17
-    ANDROID=8
+    ANDROID=9
     MTP=aosp
     GPU=r29
     MODEL=G930
-    OS_DEFCONFIG=$DEFCONFIG_OREO
+    OS_DEFCONFIG=$DEFCONFIG_PIE
     DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=yes
@@ -499,22 +498,22 @@ elif [[ $prompt == "8" ]]; then
     MAIN
 
     OS=los17
-    ANDROID=8
+    ANDROID=9
     MTP=aosp
     GPU=r29
     MODEL=G935
-    OS_DEFCONFIG=$DEFCONFIG_OREO
+    OS_DEFCONFIG=$DEFCONFIG_PIE
     DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
     PERMISSIVE=yes
     ZIP=no
     MAIN
 
     OS=los17
-    ANDROID=8
+    ANDROID=9
     MTP=aosp
     GPU=r29
     MODEL=G930
-    OS_DEFCONFIG=$DEFCONFIG_OREO
+    OS_DEFCONFIG=$DEFCONFIG_PIE
     DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
     PERMISSIVE=yes
     ZIP=no

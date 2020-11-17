@@ -10,6 +10,8 @@
  * published by the Free Software Foundation.
  */
 
+#define SEC_TS_DEBUG 0
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/delay.h>
@@ -32,6 +34,11 @@
 #include <linux/of_gpio.h>
 #include <linux/time.h>
 #include <linux/vmalloc.h>
+
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif
 
 #ifdef CONFIG_WAKE_GESTURES
 #include <linux/kernel.h>
@@ -673,6 +680,7 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 
 					if (sponge[1] & SEC_TS_MODE_SPONGE_AOD) {
 						ts->scrub_id = SPONGE_EVENT_TYPE_AOD_DOUBLETAB;
+#if SEC_TS_DEBUG
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 						input_info(true, &ts->client->dev, "%s: aod: %d\n",
 								__func__, ts->scrub_id);
@@ -680,14 +688,17 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 						input_info(true, &ts->client->dev, "%s: aod: %d, %d, %d\n",
 								__func__, ts->scrub_id, ts->scrub_x, ts->scrub_y);
 #endif
+#endif
 					} else if (sponge[1] & SEC_TS_MODE_SPONGE_SINGLE_TAP) {
 						ts->scrub_id = SPONGE_EVENT_TYPE_SINGLE_TAP;
+#if SEC_TS_DEBUG
 #ifdef CONFIG_SAMSUNG_PRODUCT_SHIP
 						input_info(true, &ts->client->dev, "%s: singletap: %d\n",
 								__func__, ts->scrub_id);
 #else
 						input_info(true, &ts->client->dev, "%s: singletap: %d, %d, %d\n",
 								__func__, ts->scrub_id, ts->scrub_x, ts->scrub_y);
+#endif
 #endif
 					}
 				} else if (sponge[1] & SEC_TS_MODE_SPONGE_SPAY) {
@@ -921,6 +932,7 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 
 		}
 
+#if SEC_TS_DEBUG
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 		if (coordinate.action == SEC_TS_Coordinate_Action_Press)
 			input_info(true, &ts->client->dev,
@@ -951,6 +963,7 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 #endif
 			ts->coord[t_id].mcount = 0;
 		}
+#endif
 	} while(is_event_remain);
 	input_sync(ts->input_dev);
 }
@@ -1788,6 +1801,11 @@ static int sec_ts_check_custom_library(struct sec_ts_data *ts)
 }
 #endif
 
+#ifdef CONFIG_FB
+static int fb_notifier_callback(struct notifier_block *self,
+	unsigned long event, void *data);
+#endif
+
 #define T_BUFF_SIZE 5
 static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
@@ -2026,6 +2044,12 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ts->early_suspend.suspend = sec_ts_early_suspend;
 	ts->early_suspend.resume = sec_ts_late_resume;
 	register_early_suspend(&ts->early_suspend);
+#endif
+
+#ifdef CONFIG_FB
+	ts->fb_notif.notifier_call = fb_notifier_callback;
+	if (fb_register_client(&ts->fb_notif))
+		pr_err("%s: could not create fb notifier\n", __func__);
 #endif
 
 #ifdef SEC_TS_SUPPORT_TA_MODE
@@ -2387,6 +2411,11 @@ static int sec_ts_remove(struct i2c_client *client)
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	tui_tsp_info = NULL;
 #endif
+
+#ifdef CONFIG_FB
+	fb_unregister_client(&ts->fb_notif);
+#endif
+
 	kfree(ts);
 	return 0;
 }
@@ -2548,6 +2577,36 @@ static int sec_ts_pm_resume(struct device *dev)
 		sec_ts_start_device(ts);
 
 	mutex_unlock(&ts->input_dev->mutex);
+
+	return 0;
+}
+
+#endif
+
+#ifdef CONFIG_FB
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	struct sec_ts_data *tc_data = container_of(self, struct sec_ts_data, fb_notif);
+
+	if (evdata && evdata->data && event == FB_EVENT_BLANK) {
+		int *blank = evdata->data;
+		switch (*blank) {
+		case FB_BLANK_UNBLANK:
+		case FB_BLANK_NORMAL:
+		case FB_BLANK_VSYNC_SUSPEND:
+		case FB_BLANK_HSYNC_SUSPEND:
+		        sec_ts_input_open(tc_data->input_dev);
+			break;
+		case FB_BLANK_POWERDOWN:
+		        sec_ts_input_close(tc_data->input_dev);
+			break;
+		default:
+			/* Don't handle what we don't understand */
+			break;
+		}
+	}
 
 	return 0;
 }
