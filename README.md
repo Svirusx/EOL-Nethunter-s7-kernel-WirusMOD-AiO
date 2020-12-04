@@ -1,3 +1,6 @@
+WirusMOD Nethunter Kernel for StockOreo, StockPie, StockQ, LineageOS 16.0 & 17.1, Treble
+Samsung Galaxy S7 / Edge ​
+
         Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
