@@ -77,15 +77,14 @@ changelog.desc=Instalation of <b>MoRoKernel</b> for <b>Galaxy S7.</b>
 
 # Instalacion
 menu.title=MoRoKernel Instalation
-menu.desc=Along with the installation of the kernel choose the desired options, type of root, app, etc.\
-The marked options are recommended.
+menu.desc=ROM Detected:
 menu.group1=Root Options
 menu.1=Without root
 menu.1desc=Recommended if you are installing another type of root on your own.
 menu.2=Magisk v21.1
 menu.2desc=Magisk with Hide enabled.
 menu.group2=Other options
-menu.3=MTweaks v2.17.3
+menu.3=MTweaks v2.18.1
 menu.3desc=Application for kernel management
 menu.4=Busybox
 menu.4desc=Busybox 1.27.2\
