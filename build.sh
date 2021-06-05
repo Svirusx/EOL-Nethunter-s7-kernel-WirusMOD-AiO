@@ -5,7 +5,7 @@
 # MoRoKernel Build Script
 #
 
-# SETUP 
+# SETUP
 # -----
 export ARCH=arm64
 export SUBARCH=arm64
@@ -27,9 +27,10 @@ DEFCONFIG_OREO=moro-oreo_defconfig
 DEFCONFIG_PIE=moro-pie_defconfig
 DEFCONFIG_S7EDGE=moro-edge_defconfig
 DEFCONFIG_S7FLAT=moro-flat_defconfig
+DEFCONFIG_N7FE=moro-grace_defconfig
 
 
-K_VERSION="v2.4"
+K_VERSION="v2.6"
 K_SUBVER="8"
 K_BASE="CTH1"
 K_NAME="Nethunter_WirusMOD"
@@ -44,6 +45,17 @@ FUNC_DELETE_PLACEHOLDERS()
 	find . -name \.placeholder -type f -delete
         echo "Placeholders Deleted from Ramdisk"
         echo ""
+}
+
+FUNC_CLEAN_DTB()
+{
+	if ! [ -d $DTSDIR ] ; then
+		echo "no directory : "$DTSDIR""
+	else
+		echo "rm files in : "$RDIR/arch/$ARCH/boot/dts/*.dtb""
+		rm $DTSDIR/*.dtb 2>/dev/null
+		rm $DTBDIR/*.dtb 2>/dev/null
+	fi
 }
 
 FUNC_BUILD_KERNEL()
@@ -92,7 +104,17 @@ FUNC_BUILD_KERNEL()
 	if [[ $OS == "twQ" ]]; then
 		sed -i '/CONFIG_HALL_EVENT_REVERSE/c\CONFIG_HALL_EVENT_REVERSE=y' $RDIR/arch/$ARCH/configs/tmp_defconfig
 	fi
+	
+	# DTB
+	if [[ $MODEL == "G935" || $MODEL == "G930" ]]; then
+		cp $DTSDIR/exynos8890-herolte_$OS.dtsi $DTSDIR/exynos8890-herolte_common.dtsi
+		echo "Used exynos8890-herolte_$OS.dtsi as exynos8890-herolte_common.dtsi"
+	elif [[ $MODEL == "N935" || $MODEL == "N930" ]]; then
+		cp $DTSDIR/exynos8890-gracelte_$OS.dtsi $DTSDIR/exynos8890-gracelte_common.dtsi
+		echo "Used exynos8890-gracelte_$OS.dtsi as exynos8890-gracelte_common.dtsi"
+	fi
 
+	# COMPILE
 	make -j$BUILD_JOB_NUMBER ARCH=$ARCH \
 			CROSS_COMPILE=$BUILD_CROSS_COMPILE \
 			tmp_defconfig || exit -1
@@ -100,51 +122,9 @@ FUNC_BUILD_KERNEL()
 			CROSS_COMPILE=$BUILD_CROSS_COMPILE || exit -1
 	echo ""
 
-	rm -f $RDIR/arch/$ARCH/configs/tmp_defconfig
-}
-
-FUNC_BUILD_DTB()
-{
-	[ -f "$DTCTOOL" ] || {
-		echo "You need to run ./build.sh first!"
-		exit 1
-	}
-	
-	cp $DTSDIR/exynos8890-herolte_$OS.dtsi $DTSDIR/exynos8890-herolte_common.dtsi
-	echo "Used exynos8890-herolte_$OS.dtsi as exynos8890-herolte_common.dtsi"
-	
-	case $MODEL in
-	G930)
-		DTSFILES="exynos8890-herolte_eur_open_04 exynos8890-herolte_eur_open_08
-				exynos8890-herolte_eur_open_09 exynos8890-herolte_eur_open_10"
-		;;
-	G935)
-		DTSFILES="exynos8890-hero2lte_eur_open_04 exynos8890-hero2lte_eur_open_08"
-		;;
-	*)
-
-		echo "Unknown device: $MODEL"
-		exit 1
-		;;
-	esac
-	mkdir -p $OUTDIR $DTBDIR
-	cd $DTBDIR || {
-		echo "Unable to cd to $DTBDIR!"
-		exit 1
-	}
-	rm -f ./*
-	echo "Processing dts files."
-	for dts in $DTSFILES; do
-		echo "=> Processing: ${dts}.dts"
-		${CROSS_COMPILE}cpp -nostdinc -undef -x assembler-with-cpp -I "$INCDIR" "$DTSDIR/${dts}.dts" > "${dts}.dts"
-		echo "=> Generating: ${dts}.dtb"
-		$DTCTOOL -p $DTB_PADDING -i "$DTSDIR" -O dtb -o "${dts}.dtb" "${dts}.dts"
-	done
-	echo "Generating dtb.img."
-	$RDIR/scripts/dtbtool_exynos/dtbtool -o "$OUTDIR/dtb.img" -d "$DTBDIR/" -s $PAGE_SIZE
-	echo "Done."
-	
-	rm -f $DTSDIR/exynos8890-herolte_common.dtsi
+	rm -f $RDIR/arch/$ARCH/configs/tmp_defconfig 2>/dev/null
+	rm -f $DTSDIR/exynos8890-herolte_common.dtsi 2>/dev/null
+	rm -f $DTSDIR/exynos8890-gracelte_common.dtsi 2>/dev/null
 }
 
 FUNC_BUILD_RAMDISK()
@@ -157,16 +137,16 @@ FUNC_BUILD_RAMDISK()
 	mkdir temp 2>/dev/null
 	cp -rf aik/. temp
 	
-	if [[ $OS == "trebleUi" ]]; then
-		cp -rf ramdisk/treble/ramdisk/. temp/ramdisk
-		cp -rf ramdisk/treble/split_img/. temp/split_img
+	if [[ $MODEL == "N935" && $OS == "twPie" ]]; then
+		cp -rf ramdisk/twPie-N935/ramdisk/. temp/ramdisk
+		cp -rf ramdisk/twPie-N935/split_img/. temp/split_img
 	else
 		cp -rf ramdisk/$OS/ramdisk/. temp/ramdisk
 		cp -rf ramdisk/$OS/split_img/. temp/split_img
 	fi
 	
 	if [[ $OS != "twQ" && $OS != "los17" ]];then
-		if [[ $OS == "treble" || $OS == "trebleUi" ]]; then
+		if [[ $OS == "treble" ]]; then
 			cp -rf init/root_treble/. temp/ramdisk
 		else
 			cp -rf init/root_common/. temp/ramdisk
@@ -242,13 +222,18 @@ elif [[ $ANDROID == "8" ]]; then
 	export PLATFORM_VERSION=8.0.0
 fi
 
-export KERNEL_VERSION="$K_SUBVER-$K_NAME-$OS-$K_BASE-$K_VERSION"
+# Kernel name for Lineage 17 & 18 roms
+if [[ $OS == "los17" ]];then
+	export KERNEL_VERSION="$K_SUBVER-$K_NAME-los17/18-$K_BASE-$K_VERSION"
+else
+	export KERNEL_VERSION="$K_SUBVER-$K_NAME-$OS-$K_BASE-$K_VERSION"
+fi
 
 (
 	START_TIME=`date +%s`
 	FUNC_DELETE_PLACEHOLDERS
 	FUNC_BUILD_KERNEL
-	FUNC_BUILD_DTB
+	FUNC_CLEAN_DTB
 	FUNC_BUILD_RAMDISK
 	if [ $ZIP == "yes" ]; then
 	    FUNC_BUILD_FLASHABLES
@@ -275,14 +260,14 @@ echo ""
 echo ""
 echo "Build Kernel for:"
 echo ""
-echo "Only S7 Flat G930"
-echo "(1) S7 Flat - Samsung OREO"
-echo "(2) S7 Flat - Samsung PIE (r29)"
-echo "(3) S7 Flat - Samsung Q"
-echo "(4) S7 Flat - Lineage 16"
-echo "(5) S7 Flat - Lineage 17"
-echo "(6) S7 Flat - TREBLE AOSP"
-echo "(7) S7 Flat - TREBLE Samsung"
+echo "Only S7 EDGE G935"
+echo "(1) S7 Edge - Samsung OREO"
+echo "(2) S7 Edge - Samsung PIE (r29)"
+echo "(3) S7 Edge - Samsung Q"
+echo "(4) S7 Edge - Lineage 16"
+echo "(5) S7 Edge - Lineage 17/18"
+echo "(6) S7 Edge - TREBLE"
+echo "(7) N7 FE - Samsung Q"
 echo ""
 echo "S7 AllInOne: OREO + PIE + Lineage + Treble"
 echo "(8) S7 AllInOne: OREO + PIE + Q + AOSP + TREBLE"
@@ -295,15 +280,15 @@ echo ""
 
 if [[ $prompt == "1" ]]; then
 
-    echo "S7 Flat - Samsung OREO Selected"
+    echo "S7 Edge - Samsung OREO Selected"
 
     OS=twOreo
     ANDROID=8
     MTP=sam
     GPU=r29
-    MODEL=G930
+    MODEL=G935
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -311,15 +296,15 @@ if [[ $prompt == "1" ]]; then
 	
 elif [[ $prompt == "2" ]]; then
 
-    echo "S7 Flat - Samsung PIE Selected (r29)"
+    echo "S7 Edge - Samsung PIE Selected (r29)"
 
     OS=twPie
     ANDROID=9
     MTP=sam
     GPU=r29
-    MODEL=G930
+    MODEL=G935
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -327,15 +312,15 @@ elif [[ $prompt == "2" ]]; then
 
 elif [[ $prompt == "3" ]]; then
 
-    echo "S7 Flat - Samsung Q Selected"
+    echo "S7 Edge - Samsung Q Selected"
 
     OS=twQ
     ANDROID=9
     MTP=sam
     GPU=r29
-    MODEL=G930
+    MODEL=G935
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -343,15 +328,15 @@ elif [[ $prompt == "3" ]]; then
 	
 elif [[ $prompt == "4" ]]; then
 
-    echo "S7 Flat - Lineage 16 Selected"
+    echo "S7 Edge - Lineage 16 Selected"
 
     OS=los16
     ANDROID=8
     MTP=aosp
     GPU=r29
-    MODEL=G930
+    MODEL=G935
     OS_DEFCONFIG=$DEFCONFIG_OREO
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -359,15 +344,15 @@ elif [[ $prompt == "4" ]]; then
 
 elif [[ $prompt == "5" ]]; then
 
-    echo "S7 Flat - Lineage 17 Selected"
+    echo "S7 Edge - Lineage 17 Selected"
 
     OS=los17
     ANDROID=9
     MTP=aosp
     GPU=r29
-    MODEL=G930
+    MODEL=G935
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
@@ -375,36 +360,36 @@ elif [[ $prompt == "5" ]]; then
     
 elif [[ $prompt == "6" ]]; then
 
-    echo "S7 Flat - TREBLE AOSP Selected"
+    echo "S7 Edge - TREBLE AOSP Selected"
 
     OS=treble
     ANDROID=9
     MTP=aosp
     GPU=r29
-    MODEL=G930
+    MODEL=G935
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    PERMISSIVE=yes
+    ZIP=yes
+    ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
+    MAIN
+
+elif [[ $prompt == "7" ]]; then
+
+    echo "N7 FE - Samsung Q Selected"
+
+    OS=twQ
+    ANDROID=9
+    MTP=sam
+    GPU=r29
+    MODEL=N935
+    OS_DEFCONFIG=$DEFCONFIG_PIE
+    DEVICE_DEFCONFIG=$DEFCONFIG_N7FE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
     MAIN
     
-elif [[ $prompt == "7" ]]; then
-
-    echo "S7 Flat - TREBLE Samsung Selected"
-
-    OS=trebleUi
-    ANDROID=9
-    MTP=sam
-    GPU=r29
-    MODEL=G930
-    OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
-    PERMISSIVE=yes
-    ZIP=yes
-    ZIP_NAME=$K_NAME-$OS-$MODEL-$K_BASE-$K_VERSION.zip
-    MAIN
-
 elif [[ $prompt == "8" ]]; then
 
     echo "S7 AllInOne: OREO + PIE + AOSP"
@@ -541,28 +526,29 @@ elif [[ $prompt == "8" ]]; then
     ZIP=no
     MAIN
     
-    OS=trebleUi
+    OS=twPie
     ANDROID=9
     MTP=sam
     GPU=r29
-    MODEL=G935
+    MODEL=N935
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7EDGE
+    DEVICE_DEFCONFIG=$DEFCONFIG_N7FE
     PERMISSIVE=yes
     ZIP=no
     MAIN
     
-    OS=trebleUi
+    OS=twQ
     ANDROID=9
     MTP=sam
     GPU=r29
-    MODEL=G930
+    MODEL=N935
     OS_DEFCONFIG=$DEFCONFIG_PIE
-    DEVICE_DEFCONFIG=$DEFCONFIG_S7FLAT
+    DEVICE_DEFCONFIG=$DEFCONFIG_N7FE
     PERMISSIVE=yes
     ZIP=yes
     ZIP_NAME=$K_NAME-AllInOne-$K_BASE-$K_VERSION.zip
     MAIN
 
 fi
+
 

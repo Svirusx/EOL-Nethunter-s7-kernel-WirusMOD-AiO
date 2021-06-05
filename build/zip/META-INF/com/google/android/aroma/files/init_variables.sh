@@ -7,18 +7,11 @@
 export SYSTEM_ROOT=false
 
 block=/dev/block/platform/155a0000.ufs/by-name/SYSTEM
-SYSTEM_MOUNT=/system
-SYSTEM=$SYSTEM_MOUNT
 
-# Try to detect system-as-root through $SYSTEM_MOUNT/init.rc like Magisk does
-# Mount whatever $SYSTEM_MOUNT is, sometimes remount is necessary if mounted read-only
+mount -o rw "$block" /system
 
-grep -q "$SYSTEM_MOUNT.*\sro[\s,]" /proc/mounts && mount -o remount,rw $SYSTEM_MOUNT || mount -o rw "$block" $SYSTEM_MOUNT
-
-# Remount /system to /system_root if we have system-as-root and bind /system to /system_root/system (like Magisk does)
-# For reference, check https://github.com/topjohnwu/Magisk/blob/master/scripts/util_functions.sh
-if [ -f /system/init.rc ]; then
-    mkdir /system_root
+if [ -f /system/init.environ.rc ]; then
+    mkdir /system_root 2>/dev/null
     mount --move /system /system_root
     mount -o bind /system_root/system /system
     export SYSTEM_ROOT=true
@@ -44,10 +37,7 @@ if [ -f /vendor/lib/hw/gralloc.exynos5.so ] || [ -f /system_root/vendor/lib/hw/g
 # If Treble Rom
     if [ -f /system/framework/com.samsung.device.jar ]; then
     # If Treble UI Rom
-        if [ $SDK == 28 ]; then
-            OS="trebleUi"
-            OSDESC="TrebleUi Pie Rom"
-        elif [ $SDK == 29 ]; then
+        if [ $SDK == 29 ]; then
             OS="twQ"
             OSDESC="Samsung Q Rom"
         fi
@@ -80,6 +70,9 @@ else
         elif [ $SDK == 29 ]; then
             OS="los17" 
             OSDESC="Lineage 17/17.1 Q Rom"
+        elif [ $SDK == 30 ]; then
+            OS="los17" 
+            OSDESC="Lineage 18/18.1 R Rom"
         fi
     fi
 fi
@@ -101,7 +94,7 @@ fi
 ==========
 # SHOW GPU
 ==========
-if [ $OS == "twPie" ] || [ $OS == "twQ" ] || [ $OS == "trebleUi" ] || [ $OS == "treble" ] || [ $OS == "trebleQ" ]; then
+if [ $OS == "twPie" ] || [ $OS == "twQ" ] || [ $OS == "treble" ] || [ $OS == "trebleQ" ]; then
     echo "show=1" > /tmp/aroma/gpu_driver.prop
 fi
 

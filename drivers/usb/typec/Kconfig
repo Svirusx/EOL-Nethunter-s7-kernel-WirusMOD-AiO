@@ -1,0 +1,11 @@
+
+menu "USB Power Delivery and Type-C drivers"
+
+config TYPEC
+	tristate
+	default y if MODEL_GRACELTE
+	default y if MODEL_GRACELTEKOR
+	depends on ANDROID_MAJOR_VERSION != "n"
+	depends on ANDROID_MAJOR_VERSION != "o"
+
+endmenu

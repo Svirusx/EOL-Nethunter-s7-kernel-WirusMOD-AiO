@@ -81,7 +81,7 @@ menu.desc=ROM Detected:
 menu.group1=Root Options
 menu.1=Without root
 menu.1desc=Recommended if you are installing another type of root on your own.
-menu.2=Magisk v21.1
+menu.2=Magisk v23.0
 menu.2desc=Magisk with Hide enabled.
 menu.group2=Other options
 menu.3=MTweaks v2.18.1
@@ -107,7 +107,7 @@ menu.12desc=Select the Overclock for Little CPU on the next screen
 menu.group4=GPU Driver
 menu.13=GPU Libs Install
 menu.13desc=On the next screen choose the GPU libs to install.
-menu.15=Magisk v21.1 Phh patched
+menu.15=Magisk v22.1 Phh patched
 menu.15desc=Magisk Phh for Q GSI roms
 menu.group5=Spectrum
 menu.14=Spectrum Support
@@ -135,6 +135,15 @@ gpu.1=r22 GPU Driver
 gpu.1desc=Solve problems with some games, but SmartView may fail in some Roms
 gpu.2=r28 GPU Driver
 gpu.2desc=The most stable for SmartView in all Roms, but can produce LAG in some games
+
+# Spectrum
+spec.title=Perfiles SPECTRUM
+spec.desc=Select the profiles for SPECTRUM
+spec.group=Spectrum Profiles
+spec.1=MoroGoku
+spec.1desc=Made by Morogoku, they are profiles with few modifications. Stable.
+spec.2=TheAlexPlaYT
+spec.2desc=Made by TheAlexPlaYT, they are more aggressive and have many modifications. If you notice problems, change to Morogoku's.
 
 # Sin Root
 stock.title=Without root

@@ -43,14 +43,22 @@ ui_print "-- Extracting"
 $BB tar -Jxf gpu_libs.tar.xz
 $BB tar -Jxf secure_storage.tar.xz
 $BB tar -Jxf aik.tar.xz
+$BB tar -Jxf wifi.tar.xz
 ui_print "-- Copying files"
 
 
-# f2fs support for los17
 if [ $OS == "los17" ]; then
+# f2fs support for los17
 	cp -f /tmp/moro/files/fstab.samsungexynos8890 /system_root
 	chmod 640 /system_root/fstab.samsungexynos8890
 	chown -R root.shell /system_root/fstab.samsungexynos8890
+	
+	
+# Wifi fix for Lineage 17.0
+	if [ ! -f $VENDOR/firmware/bcm4359C0_murata.hcd ]; then
+		ui_print "-- Fixing wifi for Lineage 17.0 roms"
+		cp -rf wifi/. $VENDOR/
+	fi	
 fi
 
 
@@ -146,8 +154,15 @@ if [ "$(file_getprop /tmp/aroma/menu.prop chk10)" == 1 ] && [ "$(file_getprop /t
 	ui_print " "
 	ui_print "@Install Spectrum Profiles"
 	mkdir -p -m 777 /data/media/0/spectrum 2>/dev/null
-	cp -rf /tmp/moro/spec_profiles/. /data/media/0/spectrum
 	
+	if [ "$(file_getprop /tmp/aroma/spec.prop selected.1)" == "1" ]; then
+		ui_print "-- Installing Morogoku profiles"
+		cp -rf /tmp/moro/spec_profiles/moro/. /data/media/0/spectrum
+	elif [ "$(file_getprop /tmp/aroma/spec.prop selected.1)" == "2" ]; then
+		ui_print "-- Installing TheAlexPlaYT profiles"
+		cp -rf /tmp/moro/spec_profiles/alex/. /data/media/0/spectrum
+	fi
+
 	# remove old spectrum profile path
 	rm -Rf /data/media/0/Spectrum 2>/dev/null
 fi
@@ -191,6 +206,8 @@ show_progress 0.34 -19000
 	ui_print " "
 	$BB unzip /tmp/moro/magisk/magisk.zip META-INF/com/google/android/* -d /tmp/moro/magisk
 	sh /tmp/moro/magisk/META-INF/com/google/android/update-binary dummy 1 /tmp/moro/magisk/magisk.zip
+	cp /tmp/moro/magisk/01magisk.apk /data/adb/magisk/magisk.apk
+	cp /tmp/moro/magisk/01magisk.apk /data/.morokernel/apk/01magisk.apk
 
 elif [ "$(file_getprop /tmp/aroma/menu.prop chk15)" == 1 ]; then
 show_progress 0.34 -19000
@@ -209,6 +226,8 @@ show_progress 0.34 -19000
 	# Install Phh Magisk
 	$BB unzip /tmp/moro/magisk/magisk.zip META-INF/com/google/android/* -d /tmp/moro/magisk
 	sh /tmp/moro/magisk/META-INF/com/google/android/update-binary dummy 1 /tmp/moro/magisk/magisk.zip
+	cp /tmp/moro/magisk/01magisk.apk /data/adb/magisk/magisk.apk
+	cp /tmp/moro/magisk/01magisk.apk /data/.morokernel/apk/01magisk.apk
 fi
 
 

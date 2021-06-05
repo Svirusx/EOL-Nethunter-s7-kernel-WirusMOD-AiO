@@ -964,7 +964,7 @@ static ssize_t camera_rear_info_show(struct device *dev,
 }
 #endif
 
-#ifdef CAMERA_SYSFS_V2
+#if defined(CONFIG_MODEL_HEROLTE) || defined(CONFIG_MODEL_HERO2LTE)
 static ssize_t ssrm_camera_info_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1712,6 +1712,7 @@ static ssize_t front_camera_hw_param_store(struct device *dev,
 	return count;
 }
 
+#if defined(CONFIG_MODEL_GRACELTE) || defined(CONFIG_MODEL_GRACELTEKOR)
 static ssize_t iris_camera_hw_param_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1739,6 +1740,7 @@ static ssize_t iris_camera_hw_param_store(struct device *dev,
 
 	return count;
 }
+#endif
 #endif
 
 #ifdef CAMERA_MODULE_DUALIZE
@@ -1769,7 +1771,7 @@ static DEVICE_ATTR(rear_sensor_standby, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH,
 static DEVICE_ATTR(rear_caminfo, S_IRUGO,
 		camera_rear_info_show, NULL);
 #endif
-#ifdef SSRM_CAMERA_INFO
+#if defined(CONFIG_MODEL_HEROLTE) || defined(CONFIG_MODEL_HERO2LTE)
 static DEVICE_ATTR(ssrm_camera_info, S_IRUGO,
 		ssrm_camera_info_show, NULL);
 #endif
@@ -1827,8 +1829,10 @@ static DEVICE_ATTR(rear_hwparam, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH,
 				rear_camera_hw_param_show, rear_camera_hw_param_store);
 static DEVICE_ATTR(front_hwparam, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH,
 				front_camera_hw_param_show, front_camera_hw_param_store);
+#if defined(CONFIG_MODEL_GRACELTE) || defined(CONFIG_MODEL_GRACELTEKOR)
 static DEVICE_ATTR(iris_hwparam, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH,
 				iris_camera_hw_param_show, iris_camera_hw_param_store);
+#endif
 #endif
 
 int svc_cheating_prevent_device_file_create(struct kobject **obj)
@@ -1987,7 +1991,7 @@ int fimc_is_create_sysfs(struct fimc_is_core *core)
 				dev_attr_rear_caminfo.attr.name);
 		}
 #endif
-#ifdef SSRM_CAMERA_INFO
+#if defined(CONFIG_MODEL_HEROLTE) || defined(CONFIG_MODEL_HERO2LTE)
 		if (device_create_file(camera_rear_dev,
 					&dev_attr_ssrm_camera_info) < 0) {
 			printk(KERN_ERR
@@ -2172,7 +2176,7 @@ int fimc_is_destroy_sysfs(struct fimc_is_core *core)
 #ifdef CAMERA_SYSFS_V2
 		device_remove_file(camera_rear_dev, &dev_attr_rear_caminfo);
 #endif
-#ifdef SSRM_CAMERA_INFO
+#if defined(CONFIG_MODEL_HEROLTE) || defined(CONFIG_MODEL_HERO2LTE)
 		device_remove_file(camera_rear_dev, &dev_attr_ssrm_camera_info);
 #endif
 #ifdef CONFIG_COMPANION_USE
