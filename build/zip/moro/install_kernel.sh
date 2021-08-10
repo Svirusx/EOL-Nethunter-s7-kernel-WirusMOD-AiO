@@ -43,27 +43,17 @@ ui_print "-- Extracting"
 $BB tar -Jxf gpu_libs.tar.xz
 $BB tar -Jxf secure_storage.tar.xz
 $BB tar -Jxf aik.tar.xz
-$BB tar -Jxf wifi.tar.xz
 ui_print "-- Copying files"
 
 
-if [ $OS == "los17" ]; then
-# f2fs support for los17
-	cp -f /tmp/moro/files/fstab.samsungexynos8890 /system_root
-	chmod 640 /system_root/fstab.samsungexynos8890
-	chown -R root.shell /system_root/fstab.samsungexynos8890
-	
-	
-# Wifi fix for Lineage 17.0
-	if [ ! -f $VENDOR/firmware/bcm4359C0_murata.hcd ]; then
-		ui_print "-- Fixing wifi for Lineage 17.0 roms"
-		cp -rf wifi/. $VENDOR/
-	fi	
+# f2fs support for los17/18
+if [ $OS == "los18" ]; then
+	. /tmp/moro/f2fs.sh
 fi
 
 
 # System As Root init scripts
-if [ $OS == "los17" ] || [ $OS == "twQ" ]; then
+if [ $OS == "los18" ] || [ $OS == "twQ" ]; then
 	. /tmp/moro/sar_init.sh
 fi
 
@@ -111,7 +101,7 @@ if [ "$(file_getprop /tmp/aroma/menu.prop chk14)" == 0 ]; then
 	
 	# Disable spectrum support
 	ui_print "-- Disabling Spectrum support"
-	if [ $OS == "los17" ] || [ $OS == "twQ" ]; then
+	if [ $OS == "los18" ] || [ $OS == "twQ" ]; then
 		rm -f /system_root/init.spectrum.rc
 		sed -i '/init.spectrum.rc/d' /system_root/init.moro.rc
 	else

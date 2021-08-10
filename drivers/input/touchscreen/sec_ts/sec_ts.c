@@ -45,6 +45,11 @@ bool scr_suspended(void)
 }
 #endif
 
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif
+
 #include "../../../i2c/busses/i2c-exynos5.h"
 #include "sec_ts.h"
 
@@ -700,9 +705,9 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					ts->scrub_id = SPONGE_EVENT_TYPE_SPAY;
 				}
 
-				input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 1);
+				input_report_key(ts->input_dev, KEY_POWER, 1);
 				input_sync(ts->input_dev);
-				input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 0);
+				input_report_key(ts->input_dev, KEY_POWER, 0);
 			}
 
 			/* sar mode */
@@ -713,9 +718,9 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					ts->scrub_id = 100; /*sar off*/
 
 				input_err(true, &ts->client->dev, "%s: SAR detected %d\n", __func__, read_event_buff[2]);
-				input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 1);
+				input_report_key(ts->input_dev, KEY_POWER, 1);
 				input_sync(ts->input_dev);
-				input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 0);
+				input_report_key(ts->input_dev, KEY_POWER, 0);
 			}
 			coordinate.action = SEC_TS_Coordinate_Action_None;
 			is_event_remain = 0;
@@ -907,9 +912,9 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					else if (p_gesture_status->gesture== SEC_TS_GESTURE_CODE_AOD)
 						ts->scrub_id = 0x08;
 
-					input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 1);
+					input_report_key(ts->input_dev, KEY_POWER, 1);
 					input_sync(ts->input_dev);
-					input_report_key(ts->input_dev, KEY_BLACK_UI_GESTURE, 0);
+					input_report_key(ts->input_dev, KEY_POWER, 0);
 				}
 			}
 			input_info(true, &ts->client->dev, "%s: GESTURE  %x %x %x %x %x %x\n", __func__,
@@ -1796,6 +1801,11 @@ static int sec_ts_check_custom_library(struct sec_ts_data *ts)
 }
 #endif
 
+#ifdef CONFIG_FB
+static int fb_notifier_callback(struct notifier_block *self,
+	unsigned long event, void *data);
+#endif
+
 #define T_BUFF_SIZE 5
 static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
@@ -1965,7 +1975,7 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	set_bit(EV_ABS, ts->input_dev->evbit);
 	set_bit(BTN_TOUCH, ts->input_dev->keybit);
 	set_bit(BTN_TOOL_FINGER, ts->input_dev->keybit);
-	set_bit(KEY_BLACK_UI_GESTURE, ts->input_dev->keybit);
+	set_bit(KEY_POWER, ts->input_dev->keybit);
 
 #ifdef SEC_TS_SUPPORT_TOUCH_KEY
 	if (ts->plat_data->support_mskey) {
@@ -2034,6 +2044,12 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ts->early_suspend.suspend = sec_ts_early_suspend;
 	ts->early_suspend.resume = sec_ts_late_resume;
 	register_early_suspend(&ts->early_suspend);
+#endif
+
+#ifdef CONFIG_FB
+	ts->fb_notif.notifier_call = fb_notifier_callback;
+	if (fb_register_client(&ts->fb_notif))
+		pr_err("%s: could not create fb notifier\n", __func__);
 #endif
 
 #ifdef SEC_TS_SUPPORT_TA_MODE
@@ -2164,20 +2180,6 @@ static int sec_ts_set_lowpowermode(struct sec_ts_data *ts, u8 mode)
 		ret = sec_ts_i2c_write(ts, SEC_TS_CMD_GESTURE_MODE, &lowpower_data, 1);
 		if (ret < 0)
 			input_err(true, &ts->client->dev, "%s: Failed to write mode\n", __func__);
-
-		if (ts->lowpower_flag & SEC_TS_MODE_SPONGE_AOD) {
-			u8 aod_rect[10] = {0x02, 0};
-
-			/* Clear AOD_RECT */
-			input_info(true, &ts->client->dev, "%s: clear aod_rect\n", __func__);
-			ret = ts->sec_ts_i2c_write(ts, SEC_TS_CMD_SPONGE_WRITE_PARAM, &aod_rect[0], 10);
-			if (ret < 0)
-				input_err(true, &ts->client->dev, "%s: Failed to write offset\n", __func__);
-
-			ret = ts->sec_ts_i2c_write(ts, SEC_TS_CMD_SPONGE_NOTIFY_PACKET, NULL, 0);
-			if (ret < 0)
-				input_err(true, &ts->client->dev, "%s: Failed to send notify\n", __func__);
-		}
 
 		input_info(true, &ts->client->dev, "%s set lowpower flag:%d lowpower_data:%d\n", __func__,
 			ts->lowpower_flag, lowpower_data);
@@ -2395,6 +2397,11 @@ static int sec_ts_remove(struct i2c_client *client)
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	tui_tsp_info = NULL;
 #endif
+
+#ifdef CONFIG_FB
+	fb_unregister_client(&ts->fb_notif);
+#endif
+
 	kfree(ts);
 	return 0;
 }
@@ -2556,6 +2563,36 @@ static int sec_ts_pm_resume(struct device *dev)
 		sec_ts_start_device(ts);
 
 	mutex_unlock(&ts->input_dev->mutex);
+
+	return 0;
+}
+
+#endif
+
+#ifdef CONFIG_FB
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	struct sec_ts_data *tc_data = container_of(self, struct sec_ts_data, fb_notif);
+
+	if (evdata && evdata->data && event == FB_EVENT_BLANK) {
+		int *blank = evdata->data;
+		switch (*blank) {
+		case FB_BLANK_UNBLANK:
+		case FB_BLANK_NORMAL:
+		case FB_BLANK_VSYNC_SUSPEND:
+		case FB_BLANK_HSYNC_SUSPEND:
+		        sec_ts_input_open(tc_data->input_dev);
+			break;
+		case FB_BLANK_POWERDOWN:
+		        sec_ts_input_close(tc_data->input_dev);
+			break;
+		default:
+			/* Don't handle what we don't understand */
+			break;
+		}
+	}
 
 	return 0;
 }

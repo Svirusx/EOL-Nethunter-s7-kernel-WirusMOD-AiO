@@ -110,11 +110,11 @@ set_os() {
                     VENDOR="${SYSTEM_MOUNT}/vendor"
                 elif [ $SDK == 29 ]; then
                     ui_print "-- Rom: Lineage 17"
-                    OS="los17"
+                    OS="los18"
                     VENDOR="${SYSTEM_MOUNT}/vendor"
                 elif [ $SDK == 30 ]; then
                     ui_print "-- Rom: Lineage 18"
-                    OS="los17"
+                    OS="los18"
                     VENDOR="${SYSTEM_MOUNT}/vendor"
                 else
                     ui_print " "
@@ -135,7 +135,7 @@ mount_parts() {
     # Mount system
     ui_print " "
     ui_print "@Mount partitions"
-    ui_print "-- mount /system"
+    ui_print "-- mount /system RW"
 
     block=/dev/block/platform/155a0000.ufs/by-name/SYSTEM
     mount -o rw "$block" /system
